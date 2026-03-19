@@ -1,0 +1,1 @@
+"""MailAI application package."""

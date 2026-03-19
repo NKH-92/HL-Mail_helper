@@ -1,0 +1,3579 @@
+﻿<!DOCTYPE html>
+<html class="light" lang="ko">
+
+<head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>HL-MailBot 대시보드</title>
+    <link href="tailwind.local.css" rel="stylesheet" />
+    <style>
+        :root {
+            --app-bg: linear-gradient(180deg, #f5f0ec 0%, #ede5de 100%);
+            --workspace-bg:
+                radial-gradient(circle at top left, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0) 30%),
+                radial-gradient(circle at right top, rgba(204, 125, 94, 0.08), rgba(204, 125, 94, 0) 28%),
+                linear-gradient(180deg, #faf7f5 0%, #f0ebe6 100%);
+            --sidebar-bg: linear-gradient(180deg, #fdfcfb 0%, #f5f0ec 100%);
+            --sidebar-head-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(245, 240, 236, 0.96));
+            --toolbar-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(250, 247, 245, 0.96));
+            --surface-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(253, 250, 248, 0.98));
+            --surface-muted: linear-gradient(180deg, #f9f5f2 0%, #f0ebe6 100%);
+            --surface-line: #d9ccc2;
+            --surface-line-soft: #e5dbd3;
+            --surface-shadow: 0 18px 36px rgba(42, 28, 15, 0.08), 0 2px 8px rgba(42, 28, 15, 0.05);
+            --surface-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.92);
+            --control-bg: linear-gradient(180deg, #ffffff 0%, #faf7f5 100%);
+            --control-line: #c9b9ab;
+            --accent: #CC7D5E;
+            --accent-strong: #b5684a;
+            --accent-soft: rgba(204, 125, 94, 0.12);
+            --text-strong: #2a1f15;
+            --text-muted: #7c6b5c;
+        }
+
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            background: #ede5de;
+        }
+
+        body {
+            min-height: 100vh;
+            min-height: 100dvh;
+            background: var(--app-bg);
+            color: var(--text-strong);
+            position: relative;
+        }
+
+        body::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(circle at 12% 0%, rgba(255, 252, 248, 0.88), rgba(255, 252, 248, 0) 26%),
+                linear-gradient(180deg, rgba(255, 252, 248, 0.14), rgba(255, 252, 248, 0));
+            pointer-events: none;
+        }
+
+        .font-display {
+            font-family: "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
+        }
+
+        .material-symbols-outlined {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 1em;
+            font-style: normal;
+            font-weight: 700;
+            line-height: 1;
+            font-family: "Segoe UI Symbol", "Segoe UI", sans-serif;
+        }
+
+        .bg-primary {
+            background: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%) !important;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 8px 18px rgba(204, 125, 94, 0.24);
+        }
+
+        .text-primary {
+            color: var(--accent) !important;
+        }
+
+        .border-primary {
+            border-color: var(--accent) !important;
+        }
+
+        .bg-primary\/10 {
+            background: linear-gradient(180deg, rgba(204, 125, 94, 0.18), rgba(204, 125, 94, 0.10)) !important;
+        }
+
+        .hover\:bg-primary\/90:hover {
+            background: linear-gradient(180deg, #c07252 0%, #a85e3f 100%) !important;
+        }
+
+        .hover\:border-primary:hover {
+            border-color: var(--accent) !important;
+        }
+
+        .bg-background-light {
+            background: var(--workspace-bg) !important;
+        }
+
+        .dark .dark\:bg-background-dark {
+            background-color: #111821 !important;
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: linear-gradient(180deg, #d9ccc2 0%, #c4b3a5 100%);
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, 0.62);
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(180deg, #c9b9ab 0%, #b09d8e 100%);
+        }
+
+        .sidebar {
+            transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .sidebar-text {
+            transition: opacity 0.2s ease, width 0.2s ease;
+            overflow: hidden;
+            white-space: nowrap;
+        }
+
+        .sidebar-tooltip {
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s;
+            position: absolute;
+            left: 100%;
+            margin-left: 12px;
+            z-index: 50;
+            white-space: nowrap;
+        }
+
+        .sidebar.collapsed .sidebar-item:hover .sidebar-tooltip {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .sidebar.collapsed {
+            width: 4.5rem;
+        }
+
+        .sidebar.collapsed .sidebar-text {
+            opacity: 0;
+            width: 0;
+            margin-left: 0;
+            display: none;
+        }
+
+        .sidebar.collapsed .sidebar-item {
+            padding-left: 0;
+            padding-right: 0;
+            justify-content: center;
+            overflow: visible;
+            position: relative;
+        }
+
+        .sidebar.collapsed .header-logo-container {
+            justify-content: center;
+            padding-left: 0.55rem;
+            padding-right: 0.55rem;
+        }
+
+        .sidebar.collapsed .sidebar-brand-main {
+            justify-content: center;
+        }
+
+        .sidebar.collapsed .sidebar-brand-copy {
+            display: none;
+        }
+
+        .view-section:not(.active) {
+            display: none !important;
+        }
+
+        .btn-loading {
+            opacity: 0.7;
+            pointer-events: none;
+        }
+
+        .btn-loading .material-symbols-outlined {
+            animation: spin 1s linear infinite;
+        }
+
+        .recipient-suggestions {
+            max-height: 220px;
+            overflow-y: auto;
+            background: rgba(255, 255, 255, 0.98);
+            border-color: var(--surface-line-soft) !important;
+            box-shadow: 0 18px 30px rgba(15, 23, 42, 0.12);
+        }
+
+        .recipient-suggestion-item:hover,
+        .recipient-suggestion-item.is-active {
+            background: linear-gradient(180deg, #fdf5f0, #faeee6);
+        }
+
+        .app-shell {
+            height: calc(100vh - 16px);
+            height: calc(100dvh - 16px);
+            margin: 8px;
+            border-radius: 22px;
+            overflow: hidden;
+            position: relative;
+            border: 1px solid rgba(255, 255, 255, 0.52);
+            box-shadow: 0 28px 52px rgba(42, 28, 15, 0.12), 0 2px 10px rgba(42, 28, 15, 0.06);
+            background: rgba(255, 252, 248, 0.34);
+        }
+
+        .app-shell::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            border-radius: inherit;
+            border: 1px solid rgba(255, 255, 255, 0.42);
+            pointer-events: none;
+        }
+
+        .content-shell {
+            padding: 1.15rem 1rem 1.4rem;
+            position: relative;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.02));
+        }
+
+        .content-shell::before {
+            content: "";
+            position: absolute;
+            inset: 0.95rem;
+            border-radius: 22px;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.10));
+            border: 1px solid rgba(255, 255, 255, 0.46);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+            opacity: 0.82;
+            pointer-events: none;
+        }
+
+        .content-stack {
+            gap: 1.4rem;
+        }
+
+        .view-heading {
+            padding-top: 0.25rem;
+        }
+
+        .view-title {
+            font-size: 1.82rem;
+            line-height: 1.16;
+            letter-spacing: -0.03em;
+        }
+
+        .view-subtitle {
+            font-size: 0.98rem;
+            line-height: 1.6;
+            max-width: 60rem;
+            color: var(--text-muted);
+        }
+
+        .panel-title {
+            font-size: 1.03rem;
+            line-height: 1.35;
+        }
+
+        .panel-subtitle {
+            font-size: 0.82rem;
+            line-height: 1.55;
+            color: #607083;
+        }
+
+        .detail-panel {
+            padding-top: 1.2rem;
+        }
+
+        .content-stack,
+        .view-heading {
+            position: relative;
+            z-index: 1;
+        }
+
+        .app-sidebar {
+            background: var(--sidebar-bg) !important;
+            border-right-color: var(--surface-line) !important;
+            box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.65), 8px 0 20px rgba(15, 23, 42, 0.04);
+        }
+
+        .header-logo-container {
+            background: var(--sidebar-head-bg);
+            border-bottom-color: var(--surface-line-soft) !important;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.88);
+        }
+
+        .nav-item {
+            position: relative;
+            border: 1px solid transparent;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+        }
+
+        .nav-item:hover {
+            background: rgba(255, 255, 255, 0.72) !important;
+            border-color: #d7e1eb;
+        }
+
+        .nav-item.bg-primary\/10 {
+            border-color: rgba(204, 125, 94, 0.24);
+            box-shadow: inset 3px 0 0 var(--accent), 0 10px 18px rgba(204, 125, 94, 0.10);
+        }
+
+        .sidebar-item {
+            background: rgba(255, 255, 255, 0.44);
+            border: 1px solid rgba(214, 224, 234, 0.92);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.62);
+        }
+
+        .sidebar-item:hover {
+            background: rgba(255, 255, 255, 0.78) !important;
+        }
+
+        .app-main {
+            position: relative;
+            background: var(--workspace-bg) !important;
+        }
+
+        .app-main::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background:
+                linear-gradient(rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.11)) 0 0 / 100% 1px,
+                linear-gradient(90deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.04)) 0 0 / 24px 100%;
+            opacity: 0.34;
+            pointer-events: none;
+        }
+
+        .app-toolbar {
+            background: var(--toolbar-bg) !important;
+            border-bottom-color: var(--surface-line) !important;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.84), 0 10px 20px rgba(15, 23, 42, 0.04);
+            backdrop-filter: blur(14px);
+        }
+
+        #header-title {
+            color: #142031;
+            letter-spacing: -0.015em;
+        }
+
+        #flash-text {
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.64), 0 8px 16px rgba(16, 185, 129, 0.10);
+            border: 1px solid rgba(134, 239, 172, 0.68);
+        }
+
+        main div.border.border-slate-200.rounded-xl,
+        main aside.border.border-slate-200.rounded-xl,
+        main section.border.border-slate-200.rounded-xl {
+            background: var(--surface-bg) !important;
+            border-color: var(--surface-line) !important;
+            box-shadow: var(--surface-shadow), var(--surface-highlight);
+        }
+
+        main .border-slate-100 {
+            border-color: var(--surface-line-soft) !important;
+        }
+
+        main .bg-slate-50 {
+            background: var(--surface-muted) !important;
+        }
+
+        main .bg-slate-50\/60 {
+            background: linear-gradient(180deg, rgba(241, 245, 249, 0.82), rgba(234, 239, 245, 0.86)) !important;
+        }
+
+        main .bg-white {
+            background-color: transparent;
+        }
+
+        main .shadow-sm,
+        main .shadow-lg,
+        main .shadow-xl {
+            box-shadow: var(--surface-shadow) !important;
+        }
+
+        input[type="text"],
+        input[type="password"],
+        input[type="number"],
+        input[type="time"],
+        input[type="datetime-local"],
+        select,
+        textarea {
+            background: var(--control-bg) !important;
+            border-color: var(--control-line) !important;
+            color: var(--text-strong) !important;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.88), 0 1px 2px rgba(15, 23, 42, 0.04);
+        }
+
+        input::placeholder,
+        textarea::placeholder {
+            color: #718194;
+        }
+
+        input:focus,
+        select:focus,
+        textarea:focus {
+            outline: none;
+            border-color: var(--accent) !important;
+            box-shadow:
+                0 0 0 3px rgba(204, 125, 94, 0.14),
+                inset 0 1px 0 rgba(255, 255, 255, 0.92),
+                0 4px 10px rgba(204, 125, 94, 0.08) !important;
+        }
+
+        button {
+            transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+        }
+
+        button:hover {
+            box-shadow: 0 10px 18px rgba(15, 23, 42, 0.08);
+        }
+
+        button:active {
+            transform: translateY(1px);
+        }
+
+        .dashboard-split {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            align-items: stretch;
+        }
+
+        .dashboard-thread-panel,
+        .dashboard-task-panel {
+            min-height: 0;
+            border-color: var(--mui-outline-strong) !important;
+            box-shadow: var(--mui-shadow-sm), inset 0 0 0 1px rgba(255, 255, 255, 0.38) !important;
+        }
+
+        @media (min-width: 64rem) {
+            .dashboard-split {
+                grid-template-columns: minmax(0, 2fr) minmax(20rem, 0.92fr);
+            }
+
+            .dashboard-split.is-detail-mode {
+                grid-template-columns: minmax(0, 1fr);
+            }
+
+            .dashboard-task-panel {
+                min-width: 20rem;
+            }
+        }
+
+        @media (min-width: 768px) {
+            .content-shell {
+                padding: 1.55rem 1.6rem 1.7rem;
+            }
+
+            .content-stack {
+                gap: 1.85rem;
+            }
+
+            .view-title {
+                font-size: 2.1rem;
+            }
+
+            .view-subtitle {
+                font-size: 1.02rem;
+            }
+
+            .detail-panel {
+                padding-top: 1.45rem;
+            }
+        }
+
+        @media (max-width: 767px) {
+            .app-shell {
+                margin: 0;
+                height: 100vh;
+                height: 100dvh;
+                border-radius: 0;
+                border: none;
+            }
+
+            .content-shell::before {
+                inset: 0.6rem;
+                border-radius: 16px;
+            }
+        }
+
+        @keyframes spin {
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+    <style>
+        :root {
+            --mui-primary: #CC7D5E;
+            /* Warm terracotta */
+            --mui-primary-dark: #b5684a;
+            --mui-primary-soft: rgba(204, 125, 94, 0.06);
+            --mui-primary-soft-strong: rgba(204, 125, 94, 0.1);
+            --mui-success-soft: rgba(36, 161, 72, 0.08);
+            --mui-bg-top: #fdfcfb;
+            /* Warm cream */
+            --mui-bg-bottom: #f5f0ec;
+            /* Warm beige */
+            --mui-paper: #ffffff;
+            --mui-paper-muted: #fdfcfb;
+            --mui-sidebar: #faf7f5;
+            --mui-panel: rgba(255, 255, 255, 0.82);
+            --mui-panel-strong: rgba(255, 255, 255, 0.94);
+            --mui-outline-soft: rgba(180, 156, 138, 0.18);
+            --mui-outline: #e0d3c8;
+            --mui-outline-strong: #cdbfb3;
+            --mui-divider: rgba(180, 156, 138, 0.24);
+            --mui-text: #2a1f15;
+            --mui-text-muted: #6b5a4c;
+            --mui-text-subtle: #8a7666;
+            --mui-shadow-xs: 0 1px 2px rgba(42, 28, 15, 0.04), 0 10px 24px -18px rgba(42, 28, 15, 0.18);
+            --mui-shadow-sm: 0 12px 28px -22px rgba(42, 28, 15, 0.18), 0 4px 12px rgba(42, 28, 15, 0.05);
+            --mui-shadow-md: 0 24px 48px -28px rgba(42, 28, 15, 0.24), 0 10px 24px rgba(42, 28, 15, 0.1);
+            --mui-focus-ring: 0 0 0 3px rgba(204, 125, 94, 0.15);
+        }
+
+        html,
+        body {
+            background: linear-gradient(180deg, var(--mui-bg-top) 0%, var(--mui-bg-bottom) 100%) !important;
+        }
+
+        body {
+            background: linear-gradient(180deg, var(--mui-bg-top) 0%, var(--mui-bg-bottom) 100%) !important;
+            color: var(--mui-text) !important;
+        }
+
+        body::before {
+            display: none;
+        }
+
+        .font-display {
+            font-family: "Segoe UI", "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif;
+        }
+
+        .app-shell {
+            margin: 10px;
+            border-radius: 18px;
+            border: 1px solid var(--mui-outline-soft);
+            background: rgba(255, 252, 248, 0.72);
+            box-shadow: 0 18px 40px -24px rgba(42, 28, 15, 0.24), 0 8px 20px -18px rgba(42, 28, 15, 0.18);
+            backdrop-filter: blur(18px);
+        }
+
+        .app-shell::before {
+            display: none;
+        }
+
+        .content-shell {
+            background: transparent !important;
+        }
+
+        .content-shell::before {
+            inset: 0.9rem;
+            border-radius: 16px;
+            background: linear-gradient(180deg, var(--mui-panel-strong), var(--mui-panel));
+            border: 1px solid var(--mui-outline-soft);
+            box-shadow: none;
+            opacity: 1;
+            backdrop-filter: blur(8px);
+        }
+
+        .content-stack {
+            gap: 1.5rem;
+        }
+
+        .view-title {
+            font-size: 2rem;
+            font-weight: 700;
+            letter-spacing: -0.025em;
+            color: var(--mui-text) !important;
+        }
+
+        .view-subtitle,
+        .panel-subtitle {
+            color: var(--mui-text-muted) !important;
+        }
+
+        .panel-title {
+            font-weight: 700;
+            color: var(--mui-text) !important;
+        }
+
+        .app-sidebar {
+            background: linear-gradient(180deg, var(--mui-panel-strong) 0%, rgba(247, 249, 252, 0.86) 100%) !important;
+            border-right-color: var(--mui-divider) !important;
+            box-shadow: none;
+        }
+
+        .header-logo-container {
+            background: var(--mui-panel-strong) !important;
+            border-bottom-color: var(--mui-divider) !important;
+            box-shadow: none;
+        }
+
+        .app-main {
+            background: transparent !important;
+        }
+
+        .app-main::before {
+            display: none;
+        }
+
+        .app-toolbar {
+            background: rgba(255, 255, 255, 0.8) !important;
+            border-bottom-color: var(--mui-divider) !important;
+            box-shadow: 0 1px 0 rgba(255, 255, 255, 0.72);
+            backdrop-filter: blur(12px);
+        }
+
+        #header-title {
+            color: var(--mui-text) !important;
+            font-size: 1.05rem;
+            font-weight: 700;
+        }
+
+        #flash-text {
+            background: var(--mui-success-soft) !important;
+            color: #2e7d32 !important;
+            border: 1px solid rgba(46, 125, 50, 0.18) !important;
+            box-shadow: none !important;
+        }
+
+        .bg-primary {
+            background: linear-gradient(180deg, #d8896a 0%, var(--mui-primary) 100%) !important;
+            box-shadow: 0 10px 24px rgba(204, 125, 94, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.22) !important;
+        }
+
+        .text-primary {
+            color: var(--mui-primary) !important;
+        }
+
+        .border-primary {
+            border-color: var(--mui-primary) !important;
+        }
+
+        .bg-primary\/10 {
+            background: var(--mui-primary-soft) !important;
+        }
+
+        .bg-primary\/5 {
+            background: rgba(204, 125, 94, 0.08) !important;
+        }
+
+        .hover\:bg-primary\/90:hover {
+            background: linear-gradient(180deg, #c07252 0%, var(--mui-primary-dark) 100%) !important;
+        }
+
+        .hover\:border-primary:hover {
+            border-color: rgba(204, 125, 94, 0.36) !important;
+        }
+
+        .nav-item {
+            border-radius: 14px;
+            color: #4a3a2c !important;
+            background: rgba(255, 255, 255, 0.52) !important;
+            border: 1px solid transparent;
+            box-shadow: none;
+        }
+
+        .nav-item:hover {
+            background: rgba(255, 255, 255, 0.82) !important;
+            border-color: var(--mui-outline-soft) !important;
+        }
+
+        .nav-item.bg-primary\/10 {
+            background: linear-gradient(180deg, rgba(204, 125, 94, 0.12), rgba(204, 125, 94, 0.05)) !important;
+            border-color: rgba(204, 125, 94, 0.18) !important;
+            box-shadow: inset 2px 0 0 var(--mui-primary) !important;
+            color: var(--mui-primary) !important;
+        }
+
+        .sidebar-item {
+            background: var(--mui-panel-strong) !important;
+            border: 1px solid var(--mui-outline-soft) !important;
+            border-radius: 16px;
+            box-shadow: none !important;
+        }
+
+        .sidebar-item:hover {
+            background: #ffffff !important;
+            border-color: var(--mui-outline) !important;
+        }
+
+        #user-avatar {
+            background: var(--mui-primary-soft-strong) !important;
+            color: var(--mui-primary) !important;
+        }
+
+        .sidebar-theme-section {
+            padding: 0 0.75rem 0.75rem;
+            border-top: 1px solid var(--mui-outline);
+        }
+
+        .sidebar-theme-card {
+            padding-top: 0.85rem;
+        }
+
+        .sidebar-theme-title {
+            margin: 0 0 0.55rem;
+            font-size: 0.68rem;
+            line-height: 1.3;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--mui-text-muted);
+        }
+
+        .toolbar-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+        }
+
+        .theme-toggle-group {
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+        }
+
+        .theme-toggle-btn {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 2.35rem;
+            height: 2.35rem;
+            padding: 0;
+            border: 1px solid var(--mui-outline-soft) !important;
+            border-radius: 999px !important;
+            background: var(--mui-panel-strong) !important;
+            color: var(--mui-text-subtle) !important;
+            box-shadow: none !important;
+            transition: border-color 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease, color 0.18s ease;
+        }
+
+        .theme-toggle-btn:hover {
+            background: #ffffff !important;
+            border-color: var(--mui-outline) !important;
+            color: var(--mui-text) !important;
+        }
+
+        .theme-toggle-btn.is-active {
+            background: linear-gradient(180deg, rgba(204, 125, 94, 0.14), rgba(204, 125, 94, 0.06)) !important;
+            border-color: rgba(204, 125, 94, 0.22) !important;
+            color: var(--mui-primary) !important;
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.42) !important;
+        }
+
+        .theme-toggle-icon {
+            font-size: 1rem;
+            line-height: 1;
+        }
+
+        main div.border.border-slate-200.rounded-xl,
+        main aside.border.border-slate-200.rounded-xl,
+        main section.border.border-slate-200.rounded-xl {
+            background: var(--mui-panel-strong) !important;
+            border-color: var(--mui-outline) !important;
+            border-radius: 16px !important;
+            box-shadow: var(--mui-shadow-xs) !important;
+        }
+
+        main .border-slate-100 {
+            border-color: var(--mui-divider) !important;
+        }
+
+        main .border-slate-200,
+        .header-logo-container,
+        .app-toolbar,
+        .app-sidebar {
+            border-color: var(--mui-outline-strong) !important;
+        }
+
+        main .bg-slate-50 {
+            background: #faf7f5 !important;
+        }
+
+        main .bg-slate-50\/60 {
+            background: rgba(250, 247, 245, 0.92) !important;
+        }
+
+        main .bg-white {
+            background-color: rgba(255, 255, 255, 0.92) !important;
+        }
+
+        main .shadow-sm,
+        main .shadow-lg,
+        main .shadow-xl {
+            box-shadow: var(--mui-shadow-xs) !important;
+        }
+
+        .recipient-suggestions {
+            background: rgba(255, 255, 255, 0.98) !important;
+            border: 1px solid var(--mui-outline) !important;
+            border-radius: 16px;
+            box-shadow: var(--mui-shadow-md) !important;
+        }
+
+        .recipient-suggestion-item:hover,
+        .recipient-suggestion-item.is-active {
+            background: rgba(204, 125, 94, 0.08) !important;
+        }
+
+        input[type="text"],
+        input[type="password"],
+        input[type="number"],
+        input[type="time"],
+        input[type="datetime-local"],
+        select,
+        textarea {
+            background: #ffffff !important;
+            border-color: var(--mui-outline) !important;
+            border-radius: 12px !important;
+            color: var(--mui-text) !important;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92), 0 1px 2px rgba(15, 23, 42, 0.02) !important;
+            transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+        }
+
+        input::placeholder,
+        textarea::placeholder {
+            color: #63768d !important;
+        }
+
+        input:focus,
+        select:focus,
+        textarea:focus {
+            border-color: var(--mui-primary) !important;
+            box-shadow: var(--mui-focus-ring), inset 0 1px 0 rgba(255, 255, 255, 0.94) !important;
+        }
+
+        input[type="checkbox"] {
+            accent-color: var(--mui-primary);
+        }
+
+        textarea#logs-runtime-area {
+            background: #111827 !important;
+            color: #d1d5db !important;
+        }
+
+        #tpl_attachment_dropzone {
+            background: #fdfaf7 !important;
+            border-color: var(--mui-outline-strong) !important;
+            border-radius: 16px !important;
+        }
+
+        button {
+            border-radius: 12px;
+            font-weight: 600;
+            letter-spacing: -0.01em;
+        }
+
+        button:hover {
+            transform: translateY(-1px);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button.bg-slate-100,
+        button.bg-slate-200 {
+            background: #ffffff !important;
+            border: 1px solid var(--mui-outline) !important;
+            color: #5a4a3c !important;
+            box-shadow: none !important;
+        }
+
+        button.bg-slate-100:hover,
+        button.bg-slate-200:hover {
+            background: #fdfaf7 !important;
+            border-color: rgba(204, 125, 94, 0.28) !important;
+        }
+
+        button.bg-red-50,
+        button.bg-orange-100,
+        button.bg-emerald-100 {
+            box-shadow: none !important;
+        }
+
+        #view-dashboard .content-stack {
+            gap: 0.95rem;
+        }
+
+        .dashboard-heading-copy {
+            display: flex;
+            flex-direction: column;
+            gap: 0.7rem;
+            min-width: 0;
+            flex: 1;
+        }
+
+        .dashboard-sync-strip {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.55rem;
+            align-items: stretch;
+        }
+
+        .dashboard-sync-pill {
+            min-width: 0;
+            flex: 1 1 180px;
+            display: flex;
+            align-items: center;
+            gap: 0.72rem;
+            padding: 0.55rem 0.8rem;
+            border: 1px solid var(--mui-outline);
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.92);
+            box-shadow: var(--mui-shadow-xs);
+        }
+
+        .dashboard-sync-pill[data-tone="blue"] {
+            border-color: rgba(59, 130, 246, 0.18);
+            background: rgba(239, 246, 255, 0.96);
+        }
+
+        .dashboard-sync-pill[data-tone="emerald"] {
+            border-color: rgba(16, 185, 129, 0.2);
+            background: rgba(236, 253, 245, 0.96);
+        }
+
+        .dashboard-sync-pill[data-tone="amber"] {
+            border-color: rgba(245, 158, 11, 0.2);
+            background: rgba(255, 251, 235, 0.96);
+        }
+
+        .dashboard-sync-pill-accent {
+            width: 0.48rem;
+            align-self: stretch;
+            border-radius: 999px;
+            background: rgba(148, 163, 184, 0.35);
+            flex-shrink: 0;
+        }
+
+        .dashboard-sync-pill[data-tone="blue"] .dashboard-sync-pill-accent {
+            background: rgba(59, 130, 246, 0.72);
+        }
+
+        .dashboard-sync-pill[data-tone="emerald"] .dashboard-sync-pill-accent {
+            background: rgba(16, 185, 129, 0.76);
+        }
+
+        .dashboard-sync-pill[data-tone="amber"] .dashboard-sync-pill-accent {
+            background: rgba(245, 158, 11, 0.78);
+        }
+
+        .dashboard-sync-pill-body {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 0.2rem;
+        }
+
+        .dashboard-sync-pill-label {
+            font-size: 0.66rem;
+            line-height: 1.15;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--mui-text-subtle);
+        }
+
+        .dashboard-sync-pill-value {
+            font-size: 0.86rem;
+            line-height: 1.25;
+            font-weight: 700;
+            color: var(--mui-text);
+        }
+
+        .dashboard-sync-pill[data-tone="blue"] .dashboard-sync-pill-value {
+            color: #1d4ed8;
+        }
+
+        .dashboard-sync-pill[data-tone="emerald"] .dashboard-sync-pill-value {
+            color: #047857;
+        }
+
+        .dashboard-sync-pill[data-tone="amber"] .dashboard-sync-pill-value {
+            color: #b45309;
+        }
+
+        .dashboard-sync-pill-detail {
+            font-size: 0.74rem;
+            line-height: 1.25;
+            color: var(--mui-text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .dashboard-overview-grid {
+            display: grid;
+            grid-template-columns: repeat(12, minmax(0, 1fr));
+            gap: 1rem;
+        }
+
+        .dashboard-overview-grid>* {
+            min-width: 0;
+        }
+
+        .dashboard-kpi-card,
+        .dashboard-focus-card,
+        .dashboard-thread-card,
+        .dashboard-detail-card,
+        .dashboard-detail-highlight,
+        .dashboard-detail-panel-card,
+        .dashboard-list-card,
+        .dashboard-timeline-card,
+        .dashboard-task-card {
+            border: 1px solid var(--mui-outline);
+            background: linear-gradient(180deg, #ffffff, #fbfdff);
+            box-shadow: var(--mui-shadow-xs);
+        }
+
+        .dashboard-kpi-card {
+            grid-column: span 3;
+            border-radius: 16px;
+            padding: 1.1rem 1.15rem;
+        }
+
+        .dashboard-kpi-card.is-highlight {
+            border-color: rgba(204, 125, 94, 0.18);
+            background: linear-gradient(180deg, #fffcfa, #fdf5f0);
+            box-shadow: var(--mui-shadow-xs);
+        }
+
+        .dashboard-kpi-label,
+        .dashboard-section-title {
+            font-size: 0.68rem;
+            line-height: 1.3;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--mui-text-subtle);
+        }
+
+        .dashboard-kpi-label-danger {
+            color: #c62828 !important;
+        }
+
+        .dashboard-kpi-label-warning {
+            color: #e65100 !important;
+        }
+
+        .dashboard-kpi-label-success {
+            color: #2e7d32 !important;
+        }
+
+        .dashboard-section-title-primary {
+            color: var(--mui-primary);
+        }
+
+        .dashboard-kpi-value {
+            margin-top: 0.55rem;
+            font-size: 2.2rem;
+            line-height: 1;
+            font-weight: 700;
+            letter-spacing: -0.04em;
+            color: var(--mui-text);
+        }
+
+        .dashboard-kpi-bar {
+            margin-top: 0.55rem;
+            height: 4px;
+            border-radius: 2px;
+            background: #e8eef5;
+            overflow: hidden;
+        }
+
+        .dashboard-kpi-bar-fill {
+            height: 100%;
+            border-radius: 2px;
+            transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .dashboard-kpi-bar-danger {
+            background: #ef4444;
+        }
+
+        .dashboard-kpi-bar-warning {
+            background: #f59e0b;
+        }
+
+        .dashboard-kpi-bar-success {
+            background: #10b981;
+        }
+
+        .dashboard-kpi-bar-primary {
+            background: var(--mui-primary);
+        }
+
+        .dashboard-kpi-foot {
+            margin-top: 0.45rem;
+            font-size: 0.82rem;
+            line-height: 1.5;
+            color: var(--mui-text-muted);
+        }
+
+        .dashboard-focus-card {
+            grid-column: 1 / -1;
+            border-radius: 20px;
+            padding: 1.25rem 1.35rem;
+            position: relative;
+            overflow: hidden;
+            background: linear-gradient(180deg, #ffffff, #f8fafc);
+        }
+
+        .dashboard-focus-card::before {
+            display: none;
+        }
+
+        .dashboard-focus-card>* {
+            position: relative;
+            z-index: 1;
+        }
+
+        .dashboard-focus-header,
+        .dashboard-thread-card-head,
+        .dashboard-list-card-head,
+        .dashboard-task-head,
+        .dashboard-detail-hero {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 0.9rem;
+        }
+
+        .dashboard-focus-title,
+        .dashboard-detail-subject {
+            margin-top: 0.35rem;
+            font-size: 1.35rem;
+            line-height: 1.3;
+            font-weight: 700;
+            letter-spacing: -0.03em;
+            color: var(--mui-text);
+        }
+
+        .dashboard-focus-body,
+        .dashboard-detail-body,
+        .dashboard-detail-highlight-body,
+        .dashboard-timeline-summary {
+            margin-top: 0.6rem;
+            font-size: 0.92rem;
+            line-height: 1.65;
+            color: #33485c;
+        }
+
+        .dashboard-focus-meta,
+        .dashboard-thread-caption,
+        .dashboard-task-meta,
+        .dashboard-list-card-meta,
+        .dashboard-timeline-note,
+        .dashboard-detail-meta,
+        .dashboard-detail-score-caption {
+            font-size: 0.78rem;
+            line-height: 1.5;
+            color: var(--mui-text-muted);
+        }
+
+        .dashboard-focus-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem 1rem;
+            margin-top: 0.9rem;
+        }
+
+        .dashboard-filter-chip,
+        .dashboard-tab-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            border-radius: 999px;
+            border: 1px solid transparent;
+            background: #faf6f3;
+            color: var(--mui-text-subtle);
+            padding: 0.48rem 0.85rem;
+            font-size: 0.77rem;
+            font-weight: 700;
+            box-shadow: none;
+        }
+
+        .dashboard-filter-chip:hover,
+        .dashboard-tab-btn:hover {
+            border-color: var(--mui-outline);
+            background: #ffffff !important;
+        }
+
+        .dashboard-filter-chip.is-active,
+        .dashboard-tab-btn.is-active {
+            border-color: rgba(204, 125, 94, 0.16);
+            background: linear-gradient(180deg, rgba(204, 125, 94, 0.12), rgba(204, 125, 94, 0.05)) !important;
+            color: var(--mui-primary) !important;
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.48);
+        }
+
+        .dashboard-filter-count {
+            min-width: 1.65rem;
+            padding: 0.16rem 0.4rem;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.92);
+            color: inherit;
+            text-align: center;
+            font-size: 0.72rem;
+            line-height: 1.2;
+        }
+
+        .dashboard-tone,
+        .dashboard-mini-chip,
+        .dashboard-priority-pill,
+        .dashboard-direction-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            border-radius: 999px;
+            border: 1px solid transparent;
+            padding: 0.3rem 0.68rem;
+            font-size: 0.72rem;
+            line-height: 1.2;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .dashboard-mini-chip {
+            background: #f9f4f0;
+            border-color: #e5dbd3;
+            color: #6b5a4c;
+        }
+
+        .dashboard-mini-chip-muted {
+            background: #faf6f3;
+            color: #8a7666;
+        }
+
+        .dashboard-mini-chip-danger {
+            background: #ffebee;
+            border-color: #ffcdd2;
+            color: #c62828;
+        }
+
+        .dashboard-mini-chip-review {
+            background: #fdf5f0;
+            border-color: #e8cdbf;
+            color: #8a5a3f;
+        }
+
+        .dashboard-tone-overdue {
+            background: #ffebee;
+            border-color: #ffcdd2;
+            color: #c62828;
+        }
+
+        .dashboard-tone-deadline_soon {
+            background: #fff3e0;
+            border-color: #ffcc80;
+            color: #ef6c00;
+        }
+
+        .dashboard-tone-approval_pending {
+            background: #fdf5f0;
+            border-color: #e8cdbf;
+            color: #8a5a3f;
+        }
+
+        .dashboard-tone-reply_needed {
+            background: #e3f2fd;
+            border-color: #bbdefb;
+            color: #1565c0;
+        }
+
+        .dashboard-tone-no_reply_3d {
+            background: #fff4e5;
+            border-color: #ffd8a8;
+            color: #d97706;
+        }
+
+        .dashboard-tone-waiting_for_reply {
+            background: #e0f2fe;
+            border-color: #bae6fd;
+            color: #0369a1;
+        }
+
+        .dashboard-tone-review_needed {
+            background: #fdf5f0;
+            border-color: #e8cdbf;
+            color: #8a5a3f;
+        }
+
+        .dashboard-tone-action_needed {
+            background: rgba(46, 125, 50, 0.08);
+            /* #e8f5e9 */
+            border-color: rgba(46, 125, 50, 0.15);
+            /* #c8e6c9 */
+            color: #2e7d32;
+        }
+
+        .dashboard-tone-neutral {
+            background: #f9f5f2;
+            border-color: #e5dbd3;
+            color: #7c6b5c;
+        }
+
+        .dashboard-priority-pill {
+            min-width: 3rem;
+            justify-content: center;
+            padding-inline: 0.8rem;
+            font-size: 0.88rem;
+        }
+
+        .dashboard-priority-high {
+            background: rgba(198, 40, 40, 0.06);
+            border-color: rgba(198, 40, 40, 0.15);
+            color: #c62828;
+        }
+
+        .dashboard-priority-medium {
+            background: rgba(230, 81, 0, 0.05);
+            /* Orange */
+            border-color: rgba(230, 81, 0, 0.15);
+            color: #e65100;
+        }
+
+        .dashboard-priority-low {
+            background: rgba(124, 107, 92, 0.06);
+            border-color: rgba(124, 107, 92, 0.15);
+            color: #7c6b5c;
+        }
+
+        .dashboard-direction-outbound {
+            background: rgba(204, 125, 94, 0.1);
+            border-color: rgba(204, 125, 94, 0.18);
+            color: var(--mui-primary);
+        }
+
+        .dashboard-direction-inbound {
+            background: #f9f5f2;
+            border-color: #e5dbd3;
+            color: #7c6b5c;
+        }
+
+        .dashboard-thread-card {
+            width: 100%;
+            min-height: 10.5rem;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            overflow: hidden;
+            border-radius: 16px;
+            padding: 1.1rem 1.15rem;
+            text-align: left;
+            transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+        }
+
+        .dashboard-thread-card::before {
+            content: "";
+            position: absolute;
+            inset: 0 auto 0 0;
+            width: 3px;
+            background: transparent;
+            transition: background 0.18s ease;
+        }
+
+        .dashboard-thread-card:hover {
+            border-color: rgba(204, 125, 94, 0.22);
+            box-shadow: var(--mui-shadow-sm);
+        }
+
+        .dashboard-thread-card:hover::before {
+            background: rgba(204, 125, 94, 0.14);
+        }
+
+        .dashboard-thread-card.is-selected {
+            border-color: rgba(204, 125, 94, 0.24);
+            background: linear-gradient(180deg, #fffcfa, #fdf5f0) !important;
+            box-shadow: 0 0 0 2px rgba(204, 125, 94, 0.08), var(--mui-shadow-sm) !important;
+            transform: none;
+            z-index: 10;
+        }
+
+        .dashboard-thread-card.is-selected::before {
+            background: var(--mui-primary);
+        }
+
+        .dashboard-thread-card.is-unread {
+            background: rgba(204, 125, 94, 0.04);
+            border-color: rgba(204, 125, 94, 0.18);
+        }
+
+        .dashboard-thread-card.is-unread::before {
+            background: var(--mui-primary);
+        }
+
+        .dashboard-thread-topline {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.74rem;
+            line-height: 1.5;
+            color: #6b5a4c;
+        }
+
+        .dashboard-thread-sender {
+            font-weight: 600;
+            color: #5a4a3c;
+        }
+
+        .dashboard-thread-separator {
+            color: #a08c7c;
+        }
+
+        .dashboard-thread-time {
+            color: #8a7666;
+        }
+
+        .dashboard-thread-title-row {
+            margin-top: 0.5rem;
+        }
+
+        .dashboard-thread-title {
+            margin: 0;
+            margin-top: 0.35rem;
+            min-width: 0;
+            font-size: 1.05rem;
+            line-height: 1.4;
+            font-weight: 700;
+            letter-spacing: -0.015em;
+            color: var(--mui-text);
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .dashboard-thread-card.is-unread .dashboard-thread-title {
+            font-weight: 700;
+            color: #000000;
+        }
+
+        .dashboard-chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem;
+        }
+
+        .dashboard-thread-summary {
+            margin-top: 0.45rem;
+            font-size: 0.84rem;
+            line-height: 1.6;
+            color: #4a3a2c;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            min-height: 0;
+        }
+
+        .dashboard-thread-caption {
+            margin-top: 0.42rem;
+            display: flex;
+            gap: 0.38rem;
+            align-items: flex-start;
+            font-size: 0.74rem;
+            line-height: 1.45;
+            color: #6b5a4c;
+            min-height: 0;
+        }
+
+        .dashboard-thread-caption-label {
+            flex: none;
+            font-weight: 700;
+            color: #4a3a2c;
+        }
+
+        .dashboard-thread-caption-text {
+            display: -webkit-box;
+            -webkit-line-clamp: 1;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .dashboard-thread-footer {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.45rem 0.65rem;
+            margin-top: auto;
+            padding-top: 0.78rem;
+            border-top: 1px solid var(--mui-divider);
+        }
+
+        .dashboard-thread-stat-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.35rem 0.65rem;
+            min-width: 0;
+        }
+
+        .dashboard-thread-stat {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            font-size: 0.73rem;
+            line-height: 1.35;
+            font-weight: 600;
+            color: #6b5a4c;
+        }
+
+        .dashboard-thread-stat.is-due {
+            color: #5a4a3c;
+        }
+
+        .dashboard-thread-card.is-selected .dashboard-thread-title {
+            color: #1a1512;
+            font-weight: 700;
+        }
+
+        .dashboard-thread-card.is-selected .dashboard-thread-summary {
+            color: #3e3026;
+        }
+
+        .dashboard-detail-stack,
+        .dashboard-detail-columns {
+            display: grid;
+            gap: 0.9rem;
+        }
+
+        .dashboard-detail-hero {
+            border-radius: 22px;
+            padding: 1.15rem 1.2rem;
+            background:
+                radial-gradient(circle at top right, rgba(204, 125, 94, 0.12), rgba(204, 125, 94, 0) 28%),
+                linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(253, 245, 240, 0.96));
+            border: 1px solid rgba(204, 125, 94, 0.14);
+            box-shadow: none;
+        }
+
+        .dashboard-detail-score-block {
+            text-align: right;
+        }
+
+        .dashboard-detail-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.9rem;
+        }
+
+        .dashboard-detail-card,
+        .dashboard-detail-panel-card {
+            border-radius: 18px;
+            padding: 1rem 1.05rem;
+        }
+
+        .dashboard-detail-highlight {
+            border-radius: 20px;
+            padding: 1.05rem 1.1rem;
+            border-color: rgba(204, 125, 94, 0.18);
+            background: linear-gradient(180deg, rgba(255, 252, 250, 0.98), rgba(253, 245, 240, 0.98));
+        }
+
+        .dashboard-detail-highlight-title {
+            margin-top: 0.45rem;
+            font-size: 1rem;
+            line-height: 1.45;
+            font-weight: 700;
+            color: var(--mui-text);
+        }
+
+        .dashboard-list-section-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.6rem;
+        }
+
+        .dashboard-section-count {
+            font-size: 0.74rem;
+            font-weight: 600;
+            color: #7a6b5c !important;
+        }
+
+        .dashboard-list-card,
+        .dashboard-timeline-card {
+            border-radius: 16px;
+            padding: 0.9rem 0.95rem;
+        }
+
+        .dashboard-list-card-title,
+        .dashboard-timeline-subject,
+        .dashboard-task-title {
+            font-size: 0.92rem;
+            line-height: 1.5;
+            font-weight: 700;
+            color: var(--mui-text);
+        }
+
+        .dashboard-timeline-top {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.45rem;
+        }
+
+        .dashboard-timeline-sender {
+            font-size: 0.76rem;
+            font-weight: 600;
+            color: #4a3a2c;
+        }
+
+        .dashboard-timeline-date {
+            font-size: 0.74rem;
+            color: #6b5a4c;
+        }
+
+        main .text-slate-400 {
+            color: #6b5a4c !important;
+        }
+
+        main .text-slate-500 {
+            color: #5a4a3c !important;
+        }
+
+        main .text-slate-600 {
+            color: #4a3a2c !important;
+        }
+
+        main .text-slate-700 {
+            color: #3a2d22 !important;
+        }
+
+        main .text-slate-800,
+        main .text-slate-900 {
+            color: var(--mui-text) !important;
+        }
+
+        .dashboard-task-card {
+            display: flex;
+            gap: 0.9rem;
+            align-items: flex-start;
+            border-radius: 18px;
+            padding: 0.95rem 1rem;
+        }
+
+        .dashboard-task-card.is-urgent {
+            border-color: rgba(198, 40, 40, 0.16);
+            background: linear-gradient(180deg, rgba(255, 251, 251, 0.98), rgba(255, 245, 245, 0.96));
+        }
+
+        .dashboard-task-card.is-completed {
+            background: linear-gradient(180deg, rgba(246, 248, 251, 0.98), rgba(241, 245, 249, 0.96));
+        }
+
+        .dashboard-task-check {
+            margin-top: 0.2rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .dashboard-task-copy {
+            min-width: 0;
+            flex: 1;
+        }
+
+        .dashboard-task-note {
+            margin-top: 0.45rem;
+            font-size: 0.8rem;
+            line-height: 1.55;
+            color: #6b5a4c;
+        }
+
+        .dashboard-empty-state {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 12rem;
+            border: 1px dashed var(--mui-outline);
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.76);
+            color: var(--mui-text-subtle);
+            font-size: 0.92rem;
+            text-align: center;
+            padding: 1.4rem;
+        }
+
+        #priority-count-text,
+        #thread-detail-badge {
+            border-radius: 999px !important;
+        }
+
+        @media (max-width: 1279px) {
+            .dashboard-kpi-card {
+                grid-column: span 6;
+            }
+        }
+
+        @media (max-width: 767px) {
+
+            .dashboard-kpi-card,
+            .dashboard-focus-card {
+                grid-column: span 12;
+            }
+
+            .dashboard-detail-grid {
+                grid-template-columns: minmax(0, 1fr);
+            }
+
+            .dashboard-focus-header,
+            .dashboard-thread-card-head,
+            .dashboard-list-card-head,
+            .dashboard-task-head,
+            .dashboard-detail-hero {
+                flex-direction: column;
+            }
+
+            .dashboard-detail-score-block {
+                text-align: left;
+            }
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: linear-gradient(180deg, #d9ccc2 0%, #c4b3a5 100%) !important;
+            border: 2px solid rgba(255, 255, 255, 0.74) !important;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(180deg, #c9b9ab 0%, #b09d8e 100%) !important;
+        }
+
+        @media (max-width: 767px) {
+            .app-shell {
+                margin: 0;
+                border-radius: 0;
+                border: none;
+                box-shadow: none;
+            }
+
+            .content-shell::before {
+                inset: 0.5rem;
+                border-radius: 20px;
+            }
+        }
+
+        #view-dashboard .view-title,
+        #view-autosend .view-title,
+        #view-logs .view-title,
+        #view-settings .view-title,
+        #view-help .view-title {
+            font-size: 1.8rem;
+            line-height: 1.14;
+        }
+
+        #view-dashboard .view-subtitle,
+        #view-autosend .view-subtitle,
+        #view-logs .view-subtitle,
+        #view-settings .view-subtitle,
+        #view-help .view-subtitle {
+            font-size: 0.92rem;
+            line-height: 1.56;
+        }
+
+        #view-dashboard .dashboard-split {
+            gap: 1rem;
+        }
+
+        #priority-filter-shell {
+            display: flex !important;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1rem;
+            background: var(--mui-panel-strong) !important;
+            border-bottom: 1px solid var(--mui-divider);
+            box-shadow: none;
+        }
+
+        #priority-thread-panel-header,
+        #priority-thread-detail-view>div:first-child {
+            border-bottom-color: var(--mui-divider) !important;
+            box-shadow: none;
+        }
+
+        #priority-thread-panel-header {
+            padding: 0.82rem 1rem !important;
+            align-items: center !important;
+        }
+
+        #priority-thread-panel-header .panel-title {
+            display: block;
+            line-height: 1.2;
+        }
+
+        #priority-filter-shell {
+            padding: 0.58rem 0.95rem !important;
+        }
+
+        #thread-detail-badge {
+            display: inline-flex !important;
+        }
+
+        #priority-count-text {
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            min-height: 1.9rem;
+            padding: 0.42rem 0.82rem !important;
+            font-size: 0.74rem !important;
+            line-height: 1.2 !important;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        #priority-filter-container button,
+        #task-tab-open,
+        #task-tab-completed {
+            border-radius: 999px !important;
+            border: 1px solid transparent !important;
+            background: #faf6f3 !important;
+            color: var(--mui-text-subtle) !important;
+            padding: 0.42rem 0.78rem !important;
+            font-size: 0.76rem !important;
+            line-height: 1.2 !important;
+            font-weight: 700 !important;
+            box-shadow: none !important;
+        }
+
+        #priority-filter-container button:hover,
+        #task-tab-open:hover,
+        #task-tab-completed:hover {
+            border-color: var(--mui-outline) !important;
+            background: #ffffff !important;
+            color: var(--mui-primary) !important;
+        }
+
+        #priority-filter-container button[class*="bg-primary/10"],
+        #task-tab-open[class*="bg-primary/10"],
+        #task-tab-completed[class*="bg-primary/10"],
+        #task-tab-open.dashboard-tab-btn.is-active,
+        #task-tab-completed.dashboard-tab-btn.is-active {
+            border-color: rgba(204, 125, 94, 0.16) !important;
+            background: linear-gradient(180deg, rgba(204, 125, 94, 0.12), rgba(204, 125, 94, 0.05)) !important;
+            color: var(--mui-primary) !important;
+        }
+
+        #priority-filter-container button span:last-child,
+        #task-tab-open span,
+        #task-tab-completed span {
+            min-width: 1.45rem;
+            border-radius: 999px !important;
+            background: rgba(255, 255, 255, 0.94) !important;
+            color: inherit !important;
+            font-size: 0.7rem !important;
+            line-height: 1.2 !important;
+            text-align: center;
+        }
+
+        #priority-thread-list,
+        #task-container,
+        #completed-task-container {
+            padding: 1.25rem !important;
+            gap: 1.1rem !important;
+        }
+
+        #priority-thread-list>button,
+        #task-container>div,
+        #completed-task-container>div,
+        #logs-history-container>div,
+        #template-list-container section>.space-y-2>div {
+            border: 1px solid var(--mui-outline) !important;
+            border-radius: 14px !important;
+            background: var(--mui-panel-strong) !important;
+            box-shadow: var(--mui-shadow-xs) !important;
+        }
+
+        #priority-thread-list>button {
+            padding: 0.9rem 0.95rem !important;
+        }
+
+        #priority-thread-list>button:hover,
+        #priority-thread-list>button[class*="ring-primary/15"] {
+            border-color: rgba(204, 125, 94, 0.22) !important;
+            box-shadow: var(--mui-shadow-sm) !important;
+        }
+
+        #priority-thread-list>button [class*="text-sm font-bold"] {
+            font-size: 0.94rem !important;
+            line-height: 1.38 !important;
+        }
+
+        #priority-thread-list>button p.text-sm,
+        #thread-detail-panel p.text-sm,
+        #task-container p.text-sm,
+        #completed-task-container p.text-sm {
+            font-size: 0.86rem !important;
+            line-height: 1.55 !important;
+        }
+
+        #priority-thread-list>button p.text-xs,
+        #priority-thread-list>button div.text-xs,
+        #thread-detail-panel p.text-xs,
+        #thread-detail-panel div.text-xs,
+        #task-container p.text-\[11px\],
+        #completed-task-container p.text-\[11px\] {
+            font-size: 0.74rem !important;
+            line-height: 1.46 !important;
+        }
+
+        #priority-thread-list>button span.inline-flex,
+        #thread-detail-panel span.inline-flex,
+        #task-container span,
+        #completed-task-container span {
+            border-radius: 999px !important;
+        }
+
+        #thread-detail-panel {
+            padding: 1rem 1.05rem !important;
+            gap: 0.9rem !important;
+        }
+
+        #thread-detail-panel>section {
+            gap: 0.85rem !important;
+        }
+
+        #thread-detail-panel .grid {
+            gap: 0.72rem !important;
+        }
+
+        #thread-detail-panel .rounded-lg,
+        #thread-detail-panel .rounded-xl {
+            border-radius: 12px !important;
+            border-color: var(--mui-outline) !important;
+            background: var(--mui-panel-strong) !important;
+            box-shadow: var(--mui-shadow-xs) !important;
+        }
+
+        #thread-detail-panel [class*="border-primary/15"] {
+            border-color: rgba(204, 125, 94, 0.16) !important;
+            background: rgba(204, 125, 94, 0.05) !important;
+        }
+
+        #view-logs .grid,
+        #view-autosend .content-stack {
+            gap: 1rem !important;
+        }
+
+        #logs-history-container,
+        #template-list-container {
+            padding: 0.9rem !important;
+            background: #faf7f5 !important;
+        }
+
+        #logs-history-container>div,
+        #template-list-container section>.space-y-2>div {
+            border: 1px solid var(--mui-outline) !important;
+            border-radius: 14px !important;
+            background: var(--mui-panel-strong) !important;
+            box-shadow: var(--mui-shadow-xs) !important;
+        }
+
+        #template-list-container section {
+            gap: 0.55rem !important;
+        }
+
+        #template-list-container section+section {
+            margin-top: 1rem !important;
+            padding-top: 1rem !important;
+            border-top: 1px solid var(--mui-divider) !important;
+        }
+
+        #template-editor-container {
+            padding: 1.1rem 1.15rem !important;
+        }
+
+        #template-editor-container .bg-slate-50,
+        #template-editor-container .bg-slate-50\/80 {
+            background: #faf7f5 !important;
+            border-color: var(--mui-outline) !important;
+            box-shadow: none !important;
+        }
+
+        #view-settings .content-stack,
+        #view-logs .content-stack {
+            gap: 1rem !important;
+        }
+
+        #view-help .content-stack {
+            gap: 0.85rem !important;
+        }
+
+        #view-help .view-heading {
+            gap: 0.2rem !important;
+        }
+
+        #view-settings label,
+        #view-autosend label {
+            color: #8a7666 !important;
+        }
+
+        #view-settings h4 {
+            font-size: 0.98rem;
+            color: var(--mui-text) !important;
+        }
+
+        #view-help {
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+        }
+
+        .help-shell {
+            min-height: 100%;
+        }
+
+        .help-layout {
+            flex: 1;
+            min-height: 0;
+            display: grid;
+            grid-template-columns: minmax(0, 1.18fr) minmax(320px, 0.82fr);
+            gap: 0.95rem;
+            align-items: stretch;
+        }
+
+        .help-side-stack {
+            display: grid;
+            grid-template-rows: auto auto;
+            gap: 0.85rem;
+            min-width: 0;
+            min-height: 0;
+        }
+
+        .help-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 0.72rem;
+            min-width: 0;
+            min-height: 0;
+            padding: 1rem 1.05rem;
+            border: 1px solid var(--mui-outline);
+            border-radius: 15px;
+            background: var(--mui-panel-strong);
+            box-shadow: var(--mui-shadow-xs);
+        }
+
+        .help-panel-primary {
+            padding: 1.08rem 1.1rem;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 250, 255, 0.98));
+        }
+
+        .help-panel-compact {
+            gap: 0.64rem;
+        }
+
+        .help-kicker {
+            font-size: 0.72rem;
+            line-height: 1.2;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--mui-primary);
+        }
+
+        .help-panel-title {
+            font-size: 1.04rem;
+            line-height: 1.34;
+            font-weight: 700;
+            color: var(--mui-text);
+        }
+
+        .help-panel-text {
+            font-size: 0.88rem;
+            line-height: 1.52;
+            color: var(--mui-text-muted);
+        }
+
+        .help-meta-grid,
+        .help-feature-list {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.62rem;
+        }
+
+        .help-feature-list {
+            grid-template-columns: minmax(0, 1fr);
+            gap: 0.55rem;
+        }
+
+        .help-step-list {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.65rem;
+        }
+
+        .help-meta-card,
+        .help-feature-item,
+        .help-step-item {
+            border: 1px solid var(--mui-outline);
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.72);
+        }
+
+        .help-meta-card,
+        .help-feature-item {
+            padding: 0.78rem 0.85rem;
+        }
+
+        .help-panel-divider {
+            height: 1px;
+            background: var(--mui-divider);
+            margin: 0.05rem 0 0.1rem;
+        }
+
+        .help-meta-label {
+            font-size: 0.72rem;
+            line-height: 1.2;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--mui-text-subtle);
+        }
+
+        .help-meta-value,
+        .help-feature-value {
+            margin-top: 0.3rem;
+            font-size: 0.92rem;
+            line-height: 1.48;
+            font-weight: 600;
+            color: var(--mui-text);
+        }
+
+        .help-meta-value {
+            font-weight: 700;
+            word-break: break-word;
+        }
+
+        .help-meta-value a {
+            color: var(--mui-primary);
+        }
+
+        .help-feature-name {
+            font-size: 0.88rem;
+            line-height: 1.42;
+            font-weight: 700;
+            color: var(--mui-text);
+        }
+
+        .help-feature-value {
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--mui-text-muted);
+        }
+
+        .help-step-item {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 0.72rem;
+            align-items: start;
+            padding: 0.8rem 0.85rem;
+        }
+
+        .help-step-item>div {
+            min-width: 0;
+        }
+
+        .help-step-number {
+            width: 1.8rem;
+            height: 1.8rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 999px;
+            background: rgba(204, 125, 94, 0.12);
+            color: var(--mui-primary);
+            font-size: 0.82rem;
+            font-weight: 800;
+            flex: none;
+        }
+
+        .help-step-title {
+            font-size: 0.88rem;
+            line-height: 1.4;
+            font-weight: 700;
+            color: var(--mui-text);
+        }
+
+        .help-step-text {
+            margin-top: 0.16rem;
+            font-size: 0.8rem;
+            line-height: 1.45;
+            color: var(--mui-text-muted);
+        }
+
+        #sched-status {
+            border-radius: 999px !important;
+            padding-inline: 0.85rem !important;
+        }
+
+        #logs-runtime-area {
+            border-top: 1px solid var(--mui-divider) !important;
+            font-size: 0.76rem !important;
+            line-height: 1.55 !important;
+        }
+
+        @media (min-width: 768px) {
+
+            #view-dashboard .view-title,
+            #view-autosend .view-title,
+            #view-logs .view-title,
+            #view-settings .view-title,
+            #view-help .view-title {
+                font-size: 1.92rem;
+            }
+        }
+
+        @media (max-width: 1180px), (max-height: 820px) {
+            #view-help {
+                overflow-y: auto !important;
+            }
+
+            .help-layout {
+                grid-template-columns: minmax(0, 1fr);
+            }
+
+            .help-side-stack {
+                grid-template-rows: auto;
+            }
+
+            .help-meta-grid,
+            .help-feature-list,
+            .help-step-list {
+                grid-template-columns: minmax(0, 1fr);
+            }
+        }
+
+        /* === Collapsible sections === */
+        .dashboard-collapsible {
+            border: 1px solid var(--mui-outline);
+            border-radius: 16px;
+            background: var(--mui-panel-strong);
+            box-shadow: var(--mui-shadow-xs);
+            overflow: hidden;
+        }
+
+        .dashboard-collapsible+.dashboard-collapsible {
+            margin-top: 0.65rem;
+        }
+
+        .dashboard-collapsible-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.85rem 1rem;
+            cursor: pointer;
+            user-select: none;
+            list-style: none;
+            transition: background 0.15s ease;
+        }
+
+        .dashboard-collapsible-header:hover {
+            background: #faf7f5;
+        }
+
+        .dashboard-collapsible-header::-webkit-details-marker {
+            display: none;
+        }
+
+        .dashboard-collapsible-right {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .dashboard-collapsible-chevron {
+            transition: transform 0.2s ease;
+            color: #7a6b5c;
+            font-size: 0.8rem;
+        }
+
+        .dashboard-collapsible[open] .dashboard-collapsible-chevron {
+            transform: rotate(90deg);
+        }
+
+        .dashboard-collapsible-body {
+            padding: 0 1rem 1rem;
+        }
+
+        /* === D-day countdown chip === */
+        .dashboard-dday-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            border-radius: 999px;
+            padding: 0.25rem 0.6rem;
+            font-size: 0.7rem;
+            font-weight: 800;
+            letter-spacing: 0.02em;
+            white-space: nowrap;
+        }
+
+        .dashboard-dday-overdue {
+            background: #ffebee;
+            color: #c62828;
+            border: 1px solid #ffcdd2;
+        }
+
+        .dashboard-dday-today {
+            background: #fff3e0;
+            color: #e65100;
+            border: 1px solid #ffcc80;
+            animation: var(--animate-pulse);
+        }
+
+        .dashboard-dday-soon {
+            background: #fff8e1;
+            color: #f57f17;
+            border: 1px solid #ffe082;
+        }
+
+        .dashboard-dday-normal {
+            background: #f9f5f2;
+            color: #7c6b5c;
+            border: 1px solid #e5dbd3;
+        }
+
+        /* === Task urgency line === */
+        .dashboard-task-urgency-line {
+            margin-top: 0.3rem;
+            font-size: 0.74rem;
+            font-weight: 600;
+            color: #7c6b5c;
+        }
+
+        .dashboard-task-urgency-line.is-urgent {
+            color: #c62828;
+        }
+
+        html.light {
+            color-scheme: light;
+        }
+
+        html.dark {
+            color-scheme: dark;
+            --app-bg: linear-gradient(180deg, #1a1512 0%, #1e1815 100%);
+            --workspace-bg:
+                radial-gradient(circle at top left, rgba(204, 125, 94, 0.16), rgba(204, 125, 94, 0) 28%),
+                radial-gradient(circle at right top, rgba(218, 146, 114, 0.12), rgba(218, 146, 114, 0) 24%),
+                linear-gradient(180deg, #1a1512 0%, #1e1815 100%);
+            --sidebar-bg: linear-gradient(180deg, #14110e 0%, #1a1512 100%);
+            --sidebar-head-bg: linear-gradient(180deg, rgba(20, 17, 14, 0.96), rgba(14, 11, 8, 0.98));
+            --toolbar-bg: linear-gradient(180deg, rgba(14, 11, 8, 0.94), rgba(16, 13, 10, 0.9));
+            --surface-bg: linear-gradient(180deg, rgba(20, 17, 14, 0.96), rgba(18, 15, 12, 0.98));
+            --surface-muted: linear-gradient(180deg, rgba(20, 17, 14, 0.92), rgba(14, 11, 8, 0.96));
+            --surface-line: #3a2e24;
+            --surface-line-soft: #4a3d32;
+            --surface-shadow: 0 18px 36px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.24);
+            --surface-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+            --control-bg: linear-gradient(180deg, #1a1512 0%, #1e1815 100%);
+            --control-line: #4a3d32;
+            --text-strong: #f0e6dc;
+            --text-muted: #b8a898;
+            --mui-primary: #da9272;
+            --mui-primary-dark: #cc7d5e;
+            --mui-primary-soft: rgba(218, 146, 114, 0.14);
+            --mui-primary-soft-strong: rgba(218, 146, 114, 0.22);
+            --mui-success-soft: rgba(34, 197, 94, 0.12);
+            --mui-bg-top: #1a1512;
+            --mui-bg-bottom: #1e1815;
+            --mui-paper: #1a1512;
+            --mui-paper-muted: #1e1815;
+            --mui-sidebar: #14110e;
+            --mui-panel: rgba(14, 11, 8, 0.78);
+            --mui-panel-strong: rgba(18, 15, 12, 0.94);
+            --mui-outline-soft: rgba(180, 156, 138, 0.18);
+            --mui-outline: #3a2e24;
+            --mui-outline-strong: #5a4a3c;
+            --mui-divider: rgba(180, 156, 138, 0.2);
+            --mui-text: #f0e6dc;
+            --mui-text-muted: #b8a898;
+            --mui-text-subtle: #a08c7c;
+            --mui-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.28), 0 10px 22px -18px rgba(0, 0, 0, 0.46);
+            --mui-shadow-sm: 0 14px 28px -22px rgba(0, 0, 0, 0.44), 0 8px 20px rgba(0, 0, 0, 0.18);
+            --mui-shadow-md: 0 24px 44px -26px rgba(0, 0, 0, 0.48), 0 14px 28px rgba(0, 0, 0, 0.22);
+            --mui-focus-ring: 0 0 0 3px rgba(218, 146, 114, 0.25);
+        }
+
+        html.dark,
+        html.dark body {
+            background: linear-gradient(180deg, var(--mui-bg-top) 0%, var(--mui-bg-bottom) 100%) !important;
+            color: var(--mui-text) !important;
+        }
+
+        html.dark .app-shell {
+            border-color: var(--mui-outline-soft);
+            background: rgba(10, 8, 6, 0.82);
+            box-shadow: 0 22px 46px -26px rgba(0, 0, 0, 0.58), 0 10px 24px rgba(0, 0, 0, 0.2);
+        }
+
+        html.dark .app-sidebar {
+            background: rgba(14, 11, 8, 0.96) !important;
+            border-right-color: var(--mui-divider) !important;
+            box-shadow: none !important;
+        }
+
+        html.dark .content-shell::before {
+            background: linear-gradient(180deg, var(--mui-panel-strong), var(--mui-panel));
+            border-color: var(--mui-outline-soft);
+            box-shadow: none;
+        }
+
+        html.dark .app-toolbar {
+            background: rgba(14, 11, 8, 0.82) !important;
+            border-bottom-color: var(--mui-divider) !important;
+            box-shadow: none;
+        }
+
+        html.dark .header-logo-container {
+            background: rgba(14, 11, 8, 0.98) !important;
+            border-bottom-color: var(--mui-divider) !important;
+            box-shadow: none;
+        }
+
+        html.dark .header-logo-container h1 {
+            color: #fff5ee !important;
+        }
+
+        html.dark .header-logo-container p {
+            color: #c9b8a8 !important;
+        }
+
+        html.dark #flash-text {
+            color: #86efac !important;
+            border-color: rgba(34, 197, 94, 0.25) !important;
+        }
+
+        html.dark .nav-item {
+            color: var(--mui-text-muted) !important;
+            background: rgba(16, 13, 10, 0.72) !important;
+            border-color: transparent !important;
+            box-shadow: none !important;
+        }
+
+        html.dark .nav-item:hover {
+            background: rgba(16, 13, 10, 0.94) !important;
+            border-color: var(--mui-outline-soft) !important;
+        }
+
+        html.dark .nav-item.bg-primary\/10 {
+            background: rgba(218, 146, 114, 0.16) !important;
+            border-color: rgba(218, 146, 114, 0.24) !important;
+            box-shadow: inset 2px 0 0 var(--mui-primary) !important;
+            color: #fde8da !important;
+        }
+
+        html.dark .sidebar-tooltip {
+            background: #0a0806;
+            color: #fde8da;
+            border: 1px solid rgba(180, 156, 138, 0.16);
+            box-shadow: var(--mui-shadow-md);
+        }
+
+        html.dark .sidebar-item {
+            background: var(--mui-panel) !important;
+            border-color: var(--mui-outline-soft) !important;
+            box-shadow: none !important;
+        }
+
+        html.dark .theme-toggle-btn {
+            background: var(--mui-panel) !important;
+            background-color: var(--mui-panel) !important;
+            background-image: none !important;
+            border-color: var(--mui-outline-soft) !important;
+            color: #d4c2b2 !important;
+            box-shadow: none !important;
+        }
+
+        html.dark .theme-toggle-btn .theme-toggle-icon {
+            color: inherit !important;
+        }
+
+        html.dark .sidebar-item:hover,
+        html.dark .theme-toggle-btn:hover {
+            background: rgba(20, 17, 14, 0.94) !important;
+            border-color: var(--mui-outline) !important;
+        }
+
+        html.dark .theme-toggle-btn.is-active {
+            background: rgba(218, 146, 114, 0.2) !important;
+            border-color: rgba(218, 146, 114, 0.36) !important;
+            color: #fff5ee !important;
+            box-shadow: inset 0 0 0 1px rgba(253, 232, 218, 0.16) !important;
+        }
+
+        html.dark #user-avatar {
+            background: rgba(218, 146, 114, 0.18) !important;
+            color: #fde8da !important;
+        }
+
+        html.dark main div.border.border-slate-200.rounded-xl,
+        html.dark main aside.border.border-slate-200.rounded-xl,
+        html.dark main section.border.border-slate-200.rounded-xl,
+        html.dark .dashboard-kpi-card,
+        html.dark .dashboard-focus-card,
+        html.dark .dashboard-thread-card,
+        html.dark .dashboard-detail-card,
+        html.dark .dashboard-detail-highlight,
+        html.dark .dashboard-detail-panel-card,
+        html.dark .dashboard-list-card,
+        html.dark .dashboard-timeline-card,
+        html.dark .dashboard-task-card,
+        html.dark .dashboard-collapsible {
+            background: linear-gradient(180deg, rgba(20, 17, 14, 0.96), rgba(18, 15, 12, 0.98)) !important;
+            border-color: var(--mui-outline) !important;
+            box-shadow: var(--mui-shadow-xs) !important;
+        }
+
+        html.dark #priority-thread-panel,
+        html.dark #dashboard-task-panel {
+            border-color: var(--mui-outline) !important;
+            box-shadow: var(--mui-shadow-xs) !important;
+        }
+
+        html.dark main .border-slate-100 {
+            border-color: rgba(148, 163, 184, 0.08) !important;
+        }
+
+        html.dark main .bg-slate-50 {
+            background: #1e1815 !important;
+        }
+
+        html.dark main .bg-slate-50\/60 {
+            background: rgba(20, 17, 14, 0.7) !important;
+        }
+
+        html.dark main .bg-white {
+            background-color: rgba(20, 17, 14, 0.88) !important;
+        }
+
+        html.dark .recipient-suggestions {
+            background: rgba(20, 17, 14, 0.98) !important;
+            border-color: var(--mui-outline) !important;
+        }
+
+        html.dark .recipient-suggestion-item:hover,
+        html.dark .recipient-suggestion-item.is-active {
+            background: rgba(218, 146, 114, 0.14) !important;
+        }
+
+        html.dark input[type="text"],
+        html.dark input[type="password"],
+        html.dark input[type="number"],
+        html.dark input[type="time"],
+        html.dark input[type="datetime-local"],
+        html.dark select,
+        html.dark textarea {
+            background: #1a1512 !important;
+            border-color: var(--mui-outline) !important;
+            color: var(--mui-text) !important;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 1px 2px rgba(0, 0, 0, 0.2) !important;
+        }
+
+        html.dark input::placeholder,
+        html.dark textarea::placeholder {
+            color: #7f90a6 !important;
+        }
+
+        html.dark input:focus,
+        html.dark select:focus,
+        html.dark textarea:focus {
+            box-shadow: var(--mui-focus-ring), inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+        }
+
+        html.dark #tpl_attachment_dropzone {
+            background: rgba(15, 23, 42, 0.72) !important;
+            border-color: var(--mui-outline-strong) !important;
+        }
+
+        html.dark button.bg-slate-100,
+        html.dark button.bg-slate-200 {
+            background: #1a1512 !important;
+            border-color: var(--mui-outline) !important;
+            color: var(--mui-text) !important;
+        }
+
+        html.dark button.bg-slate-100:hover,
+        html.dark button.bg-slate-200:hover {
+            background: #1e1815 !important;
+            border-color: rgba(218, 146, 114, 0.28) !important;
+        }
+
+        html.dark .dashboard-kpi-card.is-highlight {
+            background: linear-gradient(180deg, rgba(218, 146, 114, 0.12), rgba(20, 17, 14, 0.98)) !important;
+            border-color: rgba(218, 146, 114, 0.22) !important;
+            box-shadow: 0 8px 24px rgba(20, 17, 14, 0.3) !important;
+        }
+
+        html.dark .dashboard-kpi-label,
+        html.dark .dashboard-section-title,
+        html.dark .sidebar-theme-title {
+            color: #c4b3a5;
+        }
+
+        html.dark .dashboard-kpi-bar {
+            background: #2a2118;
+        }
+
+        html.dark .dashboard-focus-card {
+            background: linear-gradient(180deg, #1e1815, #1a1512) !important;
+        }
+
+        html.dark .dashboard-focus-body,
+        html.dark .dashboard-detail-body,
+        html.dark .dashboard-detail-highlight-body,
+        html.dark .dashboard-timeline-summary {
+            color: #e8ddd0;
+        }
+
+        html.dark .dashboard-filter-chip,
+        html.dark .dashboard-tab-btn {
+            background: rgba(20, 17, 14, 0.92) !important;
+            border-color: transparent !important;
+            color: var(--mui-text-muted) !important;
+            box-shadow: none;
+        }
+
+        html.dark .dashboard-filter-chip:hover,
+        html.dark .dashboard-tab-btn:hover {
+            background: rgba(20, 17, 14, 0.98) !important;
+            border-color: var(--mui-outline-soft) !important;
+            color: #fde8da !important;
+        }
+
+        html.dark .dashboard-filter-chip.is-active,
+        html.dark .dashboard-tab-btn.is-active {
+            background: linear-gradient(180deg, rgba(218, 146, 114, 0.22), rgba(218, 146, 114, 0.1)) !important;
+            border-color: rgba(218, 146, 114, 0.24) !important;
+            color: #fde8da !important;
+            box-shadow: inset 0 0 0 1px rgba(253, 232, 218, 0.08) !important;
+        }
+
+        html.dark .dashboard-filter-count {
+            background: rgba(8, 6, 4, 0.68);
+        }
+
+        html.dark .dashboard-mini-chip,
+        html.dark .dashboard-tone-neutral,
+        html.dark .dashboard-direction-inbound,
+        html.dark .dashboard-dday-normal {
+            background: rgba(180, 156, 138, 0.12);
+            border-color: rgba(180, 156, 138, 0.2);
+            color: #c4b3a5;
+        }
+
+        html.dark .dashboard-mini-chip-muted {
+            background: rgba(180, 156, 138, 0.08);
+            color: #b8a898;
+        }
+
+        html.dark .dashboard-mini-chip-danger,
+        html.dark .dashboard-tone-overdue,
+        html.dark .dashboard-dday-overdue,
+        html.dark .dashboard-priority-high {
+            background: rgba(239, 68, 68, 0.16);
+            border-color: rgba(248, 113, 113, 0.28);
+            color: #fca5a5;
+        }
+
+        html.dark .dashboard-tone-deadline_soon,
+        html.dark .dashboard-tone-no_reply_3d,
+        html.dark .dashboard-dday-today,
+        html.dark .dashboard-dday-soon,
+        html.dark .dashboard-priority-medium {
+            background: rgba(245, 158, 11, 0.14);
+            border-color: rgba(251, 191, 36, 0.22);
+            color: #fcd34d;
+        }
+
+        html.dark .dashboard-tone-approval_pending,
+        html.dark .dashboard-tone-review_needed,
+        html.dark .dashboard-mini-chip-review {
+            background: rgba(218, 146, 114, 0.14);
+            border-color: rgba(237, 187, 157, 0.22);
+            color: #fde8da;
+        }
+
+        html.dark .dashboard-tone-reply_needed,
+        html.dark .dashboard-direction-outbound {
+            background: rgba(204, 125, 94, 0.16);
+            border-color: rgba(218, 146, 114, 0.24);
+            color: #fde8da;
+        }
+
+        html.dark .dashboard-tone-waiting_for_reply {
+            background: rgba(14, 165, 233, 0.16);
+            border-color: rgba(56, 189, 248, 0.22);
+            color: #bae6fd;
+        }
+
+        html.dark .dashboard-tone-action_needed {
+            background: rgba(34, 197, 94, 0.14);
+            border-color: rgba(74, 222, 128, 0.22);
+            color: #86efac;
+        }
+
+        html.dark .dashboard-thread-card {
+            background: linear-gradient(180deg, rgba(20, 17, 14, 0.96), rgba(18, 15, 12, 0.98)) !important;
+        }
+
+        html.dark .dashboard-thread-card:hover {
+            border-color: rgba(218, 146, 114, 0.28);
+        }
+
+        html.dark .dashboard-thread-card.is-selected {
+            background: linear-gradient(180deg, rgba(218, 146, 114, 0.16), rgba(26, 21, 18, 0.98)) !important;
+            border-color: rgba(218, 146, 114, 0.34);
+            box-shadow: 0 0 0 2px rgba(218, 146, 114, 0.12), var(--mui-shadow-sm) !important;
+        }
+
+        html.dark .dashboard-thread-card.is-unread {
+            background: rgba(218, 146, 114, 0.1) !important;
+            border-color: rgba(218, 146, 114, 0.28);
+        }
+
+        html.dark .dashboard-thread-topline,
+        html.dark .dashboard-thread-time,
+        html.dark .dashboard-thread-stat,
+        html.dark .dashboard-thread-caption,
+        html.dark .dashboard-task-note,
+        html.dark .dashboard-section-count,
+        html.dark .dashboard-timeline-date,
+        html.dark .dashboard-timeline-note,
+        html.dark .dashboard-detail-meta,
+        html.dark .dashboard-detail-score-caption,
+        html.dark .dashboard-task-urgency-line {
+            color: #c4b3a5;
+        }
+
+        html.dark .dashboard-thread-sender,
+        html.dark .dashboard-thread-caption-label,
+        html.dark .dashboard-timeline-sender {
+            color: #f0e6dc;
+        }
+
+        html.dark .dashboard-thread-separator {
+            color: #8a7666;
+        }
+
+        html.dark .dashboard-thread-summary,
+        html.dark .dashboard-thread-card.is-selected .dashboard-thread-summary {
+            color: #e8ddd0;
+        }
+
+        html.dark .dashboard-thread-card.is-selected .dashboard-thread-title,
+        html.dark .dashboard-thread-card.is-unread .dashboard-thread-title {
+            color: #fff5ee;
+        }
+
+        html.dark .dashboard-detail-hero {
+            background:
+                radial-gradient(circle at top right, rgba(218, 146, 114, 0.18), rgba(218, 146, 114, 0) 28%),
+                linear-gradient(180deg, rgba(26, 21, 18, 0.98), rgba(20, 17, 14, 0.96));
+            border-color: rgba(218, 146, 114, 0.22);
+        }
+
+        html.dark .dashboard-detail-highlight {
+            background: linear-gradient(180deg, rgba(218, 146, 114, 0.14), rgba(20, 17, 14, 0.98));
+            border-color: rgba(218, 146, 114, 0.22);
+        }
+
+        html.dark main .text-slate-400 {
+            color: #c4b3a5 !important;
+        }
+
+        html.dark main .text-slate-500 {
+            color: #d4c2b2 !important;
+        }
+
+        html.dark main .text-slate-600 {
+            color: #e0d0c0 !important;
+        }
+
+        html.dark main .text-slate-700,
+        html.dark main .text-slate-800,
+        html.dark main .text-slate-900 {
+            color: var(--mui-text) !important;
+        }
+
+        html.dark .dashboard-task-card.is-urgent {
+            background: linear-gradient(180deg, rgba(127, 29, 29, 0.35), rgba(69, 10, 10, 0.28));
+            border-color: rgba(248, 113, 113, 0.18);
+        }
+
+        html.dark .dashboard-task-card.is-completed {
+            background: linear-gradient(180deg, rgba(30, 24, 21, 0.96), rgba(20, 17, 14, 0.94));
+        }
+
+        html.dark .dashboard-empty-state {
+            background: rgba(20, 17, 14, 0.72);
+            color: #a08c7c;
+        }
+
+        html.dark #priority-filter-shell {
+            background: rgba(14, 11, 8, 0.82) !important;
+            border-bottom-color: var(--mui-divider) !important;
+            box-shadow: none;
+        }
+
+        html.dark #priority-thread-panel-header,
+        html.dark #priority-thread-detail-view>div:first-child {
+            border-bottom-color: var(--mui-divider) !important;
+            box-shadow: none;
+        }
+
+        html.dark #priority-filter-container button,
+        html.dark #task-tab-open,
+        html.dark #task-tab-completed {
+            background: rgba(20, 17, 14, 0.92) !important;
+            border-color: transparent !important;
+            color: var(--mui-text-muted) !important;
+        }
+
+        html.dark #priority-filter-container button:hover,
+        html.dark #task-tab-open:hover,
+        html.dark #task-tab-completed:hover {
+            background: rgba(20, 17, 14, 0.98) !important;
+            border-color: var(--mui-outline-soft) !important;
+            color: #fde8da !important;
+        }
+
+        html.dark #priority-filter-container button[class*="bg-primary/10"],
+        html.dark #task-tab-open[class*="bg-primary/10"],
+        html.dark #task-tab-completed[class*="bg-primary/10"],
+        html.dark #task-tab-open.dashboard-tab-btn.is-active,
+        html.dark #task-tab-completed.dashboard-tab-btn.is-active {
+            background: linear-gradient(180deg, rgba(218, 146, 114, 0.22), rgba(218, 146, 114, 0.1)) !important;
+            border-color: rgba(218, 146, 114, 0.24) !important;
+            color: #fde8da !important;
+        }
+
+        html.dark #priority-filter-container button span:last-child,
+        html.dark #task-tab-open span,
+        html.dark #task-tab-completed span {
+            background: rgba(8, 6, 4, 0.68) !important;
+        }
+
+        html.dark #priority-thread-list>button,
+        html.dark #task-container>div,
+        html.dark #completed-task-container>div,
+        html.dark #logs-history-container>div,
+        html.dark #template-list-container section>.space-y-2>div,
+        html.dark #thread-detail-panel .rounded-lg,
+        html.dark #thread-detail-panel .rounded-xl {
+            background: linear-gradient(180deg, rgba(20, 17, 14, 0.96), rgba(18, 15, 12, 0.98)) !important;
+            border: 1px solid var(--mui-outline) !important;
+            box-shadow: var(--mui-shadow-xs) !important;
+        }
+
+        html.dark #logs-history-container,
+        html.dark #template-list-container {
+            background: rgba(20, 17, 14, 0.56) !important;
+        }
+
+        html.dark #template-list-container section+section {
+            border-top-color: var(--mui-outline) !important;
+        }
+
+        html.dark #template-editor-container .bg-slate-50,
+        html.dark #template-editor-container .bg-slate-50\/80 {
+            background: rgba(20, 17, 14, 0.72) !important;
+            border: 1px solid var(--mui-outline-strong) !important;
+            box-shadow: inset 0 0 0 1px rgba(180, 156, 138, 0.05) !important;
+        }
+
+        html.dark #view-settings label,
+        html.dark #view-autosend label {
+            color: #a08c7c !important;
+        }
+
+        html.dark .help-panel,
+        html.dark .help-meta-card,
+        html.dark .help-feature-item,
+        html.dark .help-step-item {
+            background: rgba(20, 17, 14, 0.82);
+            border-color: var(--mui-outline);
+            box-shadow: var(--mui-shadow-xs);
+        }
+
+        html.dark .help-panel-primary {
+            background: linear-gradient(180deg, rgba(20, 17, 14, 0.9), rgba(14, 11, 8, 0.96));
+        }
+
+        html.dark .dashboard-sync-pill {
+            background: rgba(20, 17, 14, 0.82);
+            border-color: var(--mui-outline);
+        }
+
+        html.dark .dashboard-sync-pill[data-tone="blue"] {
+            background: rgba(30, 64, 175, 0.2);
+            border-color: rgba(96, 165, 250, 0.2);
+        }
+
+        html.dark .dashboard-sync-pill[data-tone="emerald"] {
+            background: rgba(6, 95, 70, 0.24);
+            border-color: rgba(52, 211, 153, 0.18);
+        }
+
+        html.dark .dashboard-sync-pill[data-tone="amber"] {
+            background: rgba(120, 53, 15, 0.24);
+            border-color: rgba(251, 191, 36, 0.18);
+        }
+
+        html.dark .dashboard-sync-pill-value {
+            color: #e2e8f0;
+        }
+
+        html.dark .dashboard-sync-pill-detail {
+            color: #8ea3b8;
+        }
+
+        html.dark .help-meta-label {
+            color: #8ea3b8;
+        }
+
+        html.dark .help-step-number {
+            background: rgba(218, 146, 114, 0.18);
+            color: #fde8da;
+        }
+
+        html.dark .dashboard-collapsible-header:hover {
+            background: #1e1815;
+        }
+
+        html.dark .dashboard-collapsible-chevron {
+            color: #a08c7c;
+        }
+
+        html.dark ::-webkit-scrollbar-thumb {
+            background: linear-gradient(180deg, #4a3d32 0%, #3a2e24 100%) !important;
+            border: 2px solid rgba(14, 11, 8, 0.78) !important;
+        }
+
+        html.dark ::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(180deg, #5a4a3c 0%, #4a3d32 100%) !important;
+        }
+    </style>
+</head>
+
+<body
+    class="bg-background-light dark:bg-background-dark font-display text-slate-900 dark:text-slate-100 h-screen w-screen overflow-hidden flex flex-col m-0 p-0">
+    <div class="app-shell flex w-full overflow-hidden">
+
+        <!-- Sidebar -->
+        <aside id="sidebar"
+            class="app-sidebar sidebar w-64 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col shrink-0 z-20 shadow-sm relative">
+            <div
+                class="header-logo-container h-16 w-full px-4 flex items-center gap-3 border-b border-slate-200 dark:border-slate-800 shrink-0 overflow-hidden">
+                <div class="sidebar-brand-main flex flex-1 min-w-0 items-center gap-3">
+                    <div
+                        class="bg-primary min-w-[32px] w-8 h-8 rounded-lg flex items-center justify-center text-white shrink-0 shadow-sm">
+                        <span class="material-symbols-outlined text-lg">M</span>
+                    </div>
+                    <div class="sidebar-brand-copy sidebar-text flex-1 min-w-0">
+                        <h1 class="font-bold text-slate-900 dark:text-white leading-tight truncate">HL-KMail Bot</h1>
+                        <p class="text-[10px] text-slate-500 dark:text-slate-400 truncate">Rev.0</p>
+                    </div>
+                </div>
+                <button onclick="toggleSidebar()"
+                    class="sidebar-header-toggle w-10 h-10 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 flex items-center justify-center transition-colors focus:outline-none shrink-0"
+                    title="사이드바 접기 또는 펼치기" type="button">
+                    <span class="material-symbols-outlined text-xl transition-transform duration-300" id="sidebar-icon">
+                        &lt;
+                    </span>
+                </button>
+            </div>
+
+            <nav class="flex-1 py-6 px-3 space-y-2 overflow-y-auto overflow-x-hidden" id="nav-links">
+                <button type="button" onclick="navigate('메일 정리')" data-page="메일 정리" aria-label="메일 정리"
+                    class="nav-item w-full bg-transparent border-0 text-left cursor-pointer flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300">
+                    <span class="material-symbols-outlined shrink-0">@</span>
+                    <span class="sidebar-text">대시보드</span>
+                    <div class="sidebar-tooltip bg-slate-800 text-white text-xs px-2 py-1 rounded shadow-lg">대시보드</div>
+                </button>
+                <button type="button" onclick="navigate('메일 자동발송')" data-page="메일 자동발송" aria-label="메일 자동발송"
+                    class="nav-item w-full bg-transparent border-0 text-left cursor-pointer flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300">
+                    <span class="material-symbols-outlined shrink-0">></span>
+                    <span class="sidebar-text">자동발송</span>
+                    <div class="sidebar-tooltip bg-slate-800 text-white text-xs px-2 py-1 rounded shadow-lg">자동발송</div>
+                </button>
+                <button type="button" onclick="navigate('로그')" data-page="로그" aria-label="로그"
+                    class="nav-item w-full bg-transparent border-0 text-left cursor-pointer flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300">
+                    <span class="material-symbols-outlined shrink-0">L</span>
+                    <span class="sidebar-text">로그</span>
+                    <div class="sidebar-tooltip bg-slate-800 text-white text-xs px-2 py-1 rounded shadow-lg">로그</div>
+                </button>
+                <button type="button" onclick="navigate('설정')" data-page="설정" aria-label="설정"
+                    class="nav-item w-full bg-transparent border-0 text-left cursor-pointer flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300">
+                    <span class="material-symbols-outlined shrink-0">S</span>
+                    <span class="sidebar-text">설정</span>
+                    <div class="sidebar-tooltip bg-slate-800 text-white text-xs px-2 py-1 rounded shadow-lg">설정</div>
+                </button>
+                <button type="button" onclick="navigate('도움말')" data-page="도움말" aria-label="도움말"
+                    class="nav-item w-full bg-transparent border-0 text-left cursor-pointer flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300">
+                    <span class="material-symbols-outlined shrink-0">?</span>
+                    <span class="sidebar-text">도움말</span>
+                    <div class="sidebar-tooltip bg-slate-800 text-white text-xs px-2 py-1 rounded shadow-lg">도움말</div>
+                </button>
+            </nav>
+
+            <div class="p-4 border-t border-slate-200 dark:border-slate-800 shrink-0">
+                <div
+                    class="sidebar-item flex items-center gap-3 p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer relative transition-colors">
+                    <div class="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-sm font-bold text-slate-500 shrink-0 shadow-sm"
+                        id="user-avatar">US</div>
+                    <div class="sidebar-text flex-1 min-w-0">
+                        <p class="text-sm font-medium truncate" id="user-name">사용자 계정</p>
+                        <p class="text-[10px] text-slate-500 truncate" id="user-email">불러오는 중...</p>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Wrapper -->
+        <main
+            class="app-main flex-1 flex flex-col h-full overflow-hidden bg-background-light dark:bg-slate-950 min-w-0">
+
+            <!-- Global Header -->
+            <header
+                class="app-toolbar h-16 shrink-0 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 md:px-6 flex items-center justify-between shadow-sm z-10 w-full relative">
+                <div class="flex items-center gap-4">
+                    <h2 class="text-lg font-bold" id="header-title">메일 요약</h2>
+                </div>
+                <div class="toolbar-actions">
+                    <div aria-label="화면 모드" class="theme-toggle-group" role="group">
+                        <button aria-label="라이트 모드" class="theme-toggle-btn" id="theme-light-btn"
+                            onclick="setThemeMode('light')" title="라이트 모드" type="button">
+                            <span aria-hidden="true" class="theme-toggle-icon">&#9728;</span>
+                        </button>
+                        <button aria-label="다크 모드" class="theme-toggle-btn" id="theme-dark-btn"
+                            onclick="setThemeMode('dark')" title="다크 모드" type="button">
+                            <span aria-hidden="true" class="theme-toggle-icon">&#9681;</span>
+                        </button>
+                    </div>
+                    <div class="flex gap-2" id="flash-msg" style="display:none;">
+                        <span class="px-3 py-1 bg-green-100 text-green-700 rounded-lg text-xs font-bold"
+                            id="flash-text"></span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- DASHBOARD VIEW -->
+            <div id="view-dashboard"
+                class="view-section flex flex-col flex-1 w-full content-shell min-h-0 overflow-hidden relative">
+                <div class="w-full max-w-[100%] mx-auto h-full flex flex-col content-stack min-h-0">
+                    <div
+                        class="view-heading flex flex-col md:flex-row justify-between items-start md:items-start gap-4 shrink-0">
+                        <div class="dashboard-heading-copy">
+                            <h3 class="view-title text-2xl md:text-3xl font-extrabold tracking-tight">메일 브리프</h3>
+                            <p class="view-subtitle text-sm md:text-base text-slate-500 dark:text-slate-400 mt-1">AI가 중요
+                                메일과 후속 조치까지 한 번에 정리해주는 작업 화면입니다.</p>
+                            <div class="dashboard-sync-strip shrink-0" id="dashboard-sync-status-grid">
+                                <div class="dashboard-sync-pill">
+                                    <span class="dashboard-sync-pill-accent" aria-hidden="true"></span>
+                                    <div class="dashboard-sync-pill-body">
+                                        <div class="dashboard-sync-pill-label">상태</div>
+                                        <div class="dashboard-sync-pill-value">불러오는 중...</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <button onclick="syncMail()" id="sync-btn"
+                            class="bg-primary text-white px-5 py-2.5 rounded-lg font-semibold flex items-center gap-2 hover:bg-primary/90 transition-all shadow-sm shrink-0">
+                            <span class="material-symbols-outlined text-[18px]" id="sync-icon">R</span>
+                            <span id="sync-text">동기화</span>
+                        </button>
+                    </div>
+
+                    <div class="dashboard-split grid grid-cols-1 gap-4 md:gap-6 flex-1 min-h-0 overflow-hidden" id="dashboard-split-shell">
+                        <div
+                            class="dashboard-thread-panel flex flex-col bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm h-full relative min-w-0" id="priority-thread-panel">
+                            <div
+                                class="bg-slate-50 border-b border-slate-200 px-6 py-4 flex justify-between items-start gap-3 shrink-0 w-full" id="priority-thread-panel-header">
+                                <div>
+                                    <span class="panel-title font-bold text-slate-800">우선순위 스레드</span>
+                                </div>
+                                <span
+                                    class="text-xs font-semibold text-slate-500 bg-white border border-slate-200 px-2.5 py-1 rounded-full"
+                                    id="priority-count-text">0개 스레드</span>
+                            </div>
+                            <div class="px-4 py-3 border-b border-slate-100 bg-white shrink-0"
+                                id="priority-filter-shell">
+                                <div class="flex flex-wrap gap-2" id="priority-filter-container">
+                                    <span class="text-xs text-slate-400">불러오는 중...</span>
+                                </div>
+                            </div>
+                            <div class="flex flex-1 min-h-0 flex-col" id="priority-thread-list-view">
+                                <div class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden w-full p-4 space-y-3 bg-slate-50/60"
+                                    id="priority-thread-list">
+                                    <div class="text-center text-slate-400 py-16">불러오는 중...</div>
+                                </div>
+                                <div class="shrink-0 border-t border-slate-100 bg-white px-4 py-3" id="priority-pagination-shell">
+                                    <div class="flex flex-wrap items-center justify-center gap-2" id="priority-pagination">
+                                        <span class="text-xs text-slate-400">불러오는 중...</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div
+                            class="dashboard-task-panel flex flex-col bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm h-full relative min-w-0" id="dashboard-task-panel">
+                            <div
+                                class="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50 shrink-0 w-full">
+                                <h4 class="panel-title font-bold text-slate-800">내 액션 보드</h4>
+                            </div>
+                            <div class="px-4 py-3 border-b border-slate-100 bg-white flex items-center gap-2 shrink-0">
+                                <button id="task-tab-open" onclick="switchTaskTab('open')"
+                                    class="dashboard-tab-btn is-active">
+                                    진행
+                                    <span id="task-tab-open-count"
+                                        class="bg-white/80 px-1.5 py-0.5 rounded-full">0</span>
+                                </button>
+                                <button id="task-tab-completed" onclick="switchTaskTab('completed')"
+                                    class="dashboard-tab-btn">
+                                    완료
+                                    <span id="task-tab-completed-count"
+                                        class="bg-white px-1.5 py-0.5 rounded-full">0</span>
+                                </button>
+                            </div>
+                            <div class="flex-1 min-h-0">
+                                <div class="h-full overflow-y-auto overflow-x-hidden w-full p-6 space-y-4"
+                                    id="task-container">
+                                    <div
+                                        class="text-center text-slate-400 py-12 flex flex-col items-center justify-center gap-2 h-full">
+                                        불러오는 중...</div>
+                                </div>
+                                <div class="hidden h-full overflow-y-auto overflow-x-hidden w-full p-6 space-y-4"
+                                    id="completed-task-container">
+                                    <div
+                                        class="text-center text-slate-400 py-12 flex flex-col items-center justify-center gap-2 h-full">
+                                        불러오는 중...</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- LOGS VIEW -->
+            <div id="view-logs"
+                class="view-section flex flex-col flex-1 w-full content-shell min-h-0 overflow-hidden relative">
+                <div class="w-full max-w-[100%] mx-auto h-full flex flex-col content-stack min-h-0">
+                    <div class="view-heading flex flex-col gap-1 shrink-0">
+                        <h3 class="view-title text-2xl font-extrabold tracking-tight">발송 이력 및 로그</h3>
+                        <p class="view-subtitle text-sm text-slate-500">발송 내역과 애플리케이션 동작 로그를 한눈에 확인할 수 있도록 정리한 화면입니다.
+                        </p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 flex-1 min-h-0 overflow-hidden">
+                        <!-- Left: Send History -->
+                        <div
+                            class="flex flex-col bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm h-full">
+                            <div
+                                class="bg-slate-50 border-b border-slate-200 px-6 py-4 font-bold text-slate-800 shrink-0">
+                                최근 발송 기록</div>
+                            <div class="flex-1 overflow-y-auto p-4 space-y-3" id="logs-history-container"></div>
+                        </div>
+                        <!-- Right: App Logs -->
+                        <div
+                            class="flex flex-col bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm h-full">
+                            <div
+                                class="bg-slate-50 border-b border-slate-200 px-6 py-4 font-bold text-slate-800 shrink-0">
+                                애플리케이션 로그</div>
+                            <div class="flex-1 p-0 overflow-hidden"><textarea id="logs-runtime-area"
+                                    class="w-full h-full p-4 text-xs font-mono bg-slate-900 text-slate-300 resize-none outline-none border-none"
+                                    readonly></textarea></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SETTINGS VIEW -->
+            <div id="view-settings"
+                class="view-section flex flex-col flex-1 w-full content-shell overflow-y-auto relative">
+                <div class="w-full max-w-6xl mx-auto flex flex-col content-stack">
+                    <div class="view-heading flex flex-col gap-1">
+                        <h3 class="view-title text-2xl font-extrabold tracking-tight">환경 설정</h3>
+                        <p class="view-subtitle text-sm text-slate-500">메일과 API 연결 정보, 동기화 규칙과 사용자 프로필을 한곳에서 관리합니다.</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4" id="settings-health-grid">
+                        <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-4 text-sm text-slate-400">불러오는 중...</div>
+                    </div>
+
+                    <div class="bg-white border border-slate-200 rounded-xl shadow-sm p-6 flex flex-col gap-4">
+                        <h4 class="font-bold border-b pb-2 mb-2">계정 및 기본 연결</h4>
+                        <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 md:gap-5">
+                            <div><label class="block text-xs font-bold text-slate-500 mb-1">메일 주소</label><input
+                                    type="text" id="set_email" oninput="applyAddressBookProfile()"
+                                    class="w-full border border-slate-300 rounded-lg text-sm bg-slate-50 px-3 py-2.5" />
+                            </div>
+                            <div><label class="block text-xs font-bold text-slate-500 mb-1">메일 비밀번호</label><input
+                                    type="password" id="set_pwd" placeholder="(변경 시에만 입력)"
+                                    class="w-full border border-slate-300 rounded-lg text-sm bg-slate-50 px-3 py-2.5" />
+                            </div>
+                            <div><label class="block text-xs font-bold text-slate-500 mb-1">이름</label><input type="text"
+                                    id="set_name"
+                                    class="w-full border border-slate-300 rounded-lg text-sm bg-slate-50 px-3 py-2.5" />
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 mb-1">부서 / 직책</label>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    <input type="text" id="set_dept" placeholder="부서"
+                                        class="w-full border border-slate-300 rounded-lg text-sm bg-slate-50 px-3 py-2.5" />
+                                    <input type="text" id="set_title" placeholder="직책"
+                                        class="w-full border border-slate-300 rounded-lg text-sm bg-slate-50 px-3 py-2.5" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <h4 class="font-bold border-b pb-2 mb-2 mt-4">동기화 및 AI 고급 설정</h4>
+                        <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 md:gap-5">
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 mb-1">메일함</label>
+                                <div class="flex flex-col sm:flex-row gap-2">
+                                    <input type="text" id="set_mailbox"
+                                        class="w-full border border-slate-300 rounded-lg text-sm bg-slate-50 px-3 py-2.5" />
+                                    <button onclick="testMailbox()"
+                                        class="bg-slate-200 px-4 py-2.5 rounded-lg text-xs font-bold shrink-0 sm:min-w-[88px]">목록</button>
+                                </div>
+                            </div>
+                            <div><label class="block text-xs font-bold text-slate-500 mb-1">동기화 일수</label><input
+                                    type="number" id="set_days"
+                                    class="w-full border border-slate-300 rounded-lg text-sm bg-slate-50 px-3 py-2.5" />
+                            </div>
+                            <div><label class="block text-xs font-bold text-slate-500 mb-1">배치 크기</label><input
+                                    type="number" id="set_batch"
+                                    class="w-full border border-slate-300 rounded-lg text-sm bg-slate-50 px-3 py-2.5" />
+                            </div>
+                            <div><label class="block text-xs font-bold text-slate-500 mb-1">자동 동기화 주기 (분)</label><input
+                                    type="number" id="set_interval"
+                                    class="w-full border border-slate-300 rounded-lg text-sm bg-slate-50 px-3 py-2.5" />
+                            </div>
+                            <div><label class="block text-xs font-bold text-slate-500 mb-1">스캔 상한</label><input
+                                    type="number" id="set_scan_limit"
+                                    class="w-full border border-slate-300 rounded-lg text-sm bg-slate-50 px-3 py-2.5" />
+                            </div>
+                            <div><label class="block text-xs font-bold text-slate-500 mb-1">본문 미리보기 길이</label><input
+                                    type="number" id="set_preview_chars"
+                                    class="w-full border border-slate-300 rounded-lg text-sm bg-slate-50 px-3 py-2.5" />
+                            </div>
+                            <div><label class="block text-xs font-bold text-slate-500 mb-1">AI 타임아웃 (초)</label><input
+                                    type="number" id="set_timeout"
+                                    class="w-full border border-slate-300 rounded-lg text-sm bg-slate-50 px-3 py-2.5" />
+                            </div>
+                            <div><label class="block text-xs font-bold text-slate-500 mb-1">AI 제공처</label><select
+                                    id="set_ai_provider" onchange="handleAiProviderChange()"
+                                    class="w-full border border-slate-300 rounded-lg text-sm bg-slate-50 px-3 py-2.5">
+                                    <option value="gemini">Google AI (Gemini)</option>
+                                    <option value="hanlim_openai">사내 AI 허브</option>
+                                </select></div>
+                            <div><label class="block text-xs font-bold text-slate-500 mb-1">AI 엔드포인트</label><input
+                                    type="text" id="set_ai_base_url"
+                                    class="w-full border border-slate-300 rounded-lg text-sm bg-slate-50 px-3 py-2.5" />
+                            </div>
+                            <div><label class="block text-xs font-bold text-slate-500 mb-1">AI 모델</label><select
+                                    id="set_model"
+                                    class="w-full border border-slate-300 rounded-lg text-sm bg-slate-50 px-3 py-2.5">
+                                    <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                                    <option value="gemini-3.1-flash-lite-preview">gemini-3.1-flash-lite-preview</option>
+                                    <option value="gemma-3-27b-it">gemma-3-27b-it</option>
+                                    <option value="hanlimAI">hanlimAI</option>
+                                </select></div>
+                            <div class="xl:col-span-2 flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                                <div>
+                                    <label class="block text-xs font-bold text-slate-500">원문 본문 저장</label>
+                                    <p class="mt-1 text-xs text-slate-500">검색과 원문 미리보기 품질은 좋아지지만 로컬 저장량이 늘어납니다.</p>
+                                </div>
+                                <label class="inline-flex items-center gap-2 text-sm font-semibold text-slate-700">
+                                    <input type="checkbox" id="set_store_raw_body" class="rounded border-slate-300 text-primary">
+                                    사용
+                                </label>
+                            </div>
+                            <div class="xl:col-span-2" id="set_gemini_api_wrap"><label class="block text-xs font-bold text-slate-500 mb-1">Google
+                                    AI 키</label><input type="password" id="set_api" placeholder="(변경 시에만 입력)"
+                                    class="w-full border border-slate-300 rounded-lg text-sm bg-slate-50 px-3 py-2.5" />
+                            </div>
+                            <div class="xl:col-span-2 hidden" id="set_hanlim_api_wrap"><label class="block text-xs font-bold text-slate-500 mb-1">사내
+                                    AI 키</label><input type="password" id="set_hanlim_api" placeholder="(변경 시에만 입력)"
+                                    class="w-full border border-slate-300 rounded-lg text-sm bg-slate-50 px-3 py-2.5" />
+                            </div>
+                            <div class="xl:col-span-2">
+                                <p class="text-xs text-slate-500">AI 키는 프로그램 파일이나 설정 파일이 아니라 Windows 자격 증명 저장소에만 보관됩니다.</p>
+                            </div>
+                        </div>
+
+                        <div class="flex flex-wrap items-center gap-3 mt-4 pt-4 border-t">
+                            <button onclick="clearSecret('password')"
+                                class="px-4 py-2.5 bg-red-50 text-red-600 rounded-lg text-sm font-bold border border-red-200 w-full sm:w-auto">비밀번호
+                                지우기</button>
+                            <button onclick="clearSecret('api_key')"
+                                class="px-4 py-2.5 bg-red-50 text-red-600 rounded-lg text-sm font-bold border border-red-200 w-full sm:w-auto">Google AI
+                                키 지우기</button>
+                            <button onclick="clearSecret('hanlim_api_key')"
+                                class="px-4 py-2.5 bg-red-50 text-red-600 rounded-lg text-sm font-bold border border-red-200 w-full sm:w-auto">사내 AI 키
+                                지우기</button>
+                            <button onclick="saveSettings()" id="save-settings-btn"
+                                class="px-6 py-2.5 bg-primary text-white rounded-lg text-sm font-bold shadow-sm w-full sm:w-auto sm:ml-auto">설정
+                                저장</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- HELP VIEW -->
+            <div id="view-help"
+                class="view-section flex flex-col flex-1 w-full content-shell min-h-0 relative">
+                <div class="w-full max-w-6xl mx-auto flex flex-col content-stack min-h-0 help-shell">
+                    <div class="view-heading flex flex-col gap-1">
+                        <h3 class="view-title text-2xl font-extrabold tracking-tight">도움말</h3>
+                        <p class="view-subtitle text-sm text-slate-500">핵심 사용 순서와 문의처를 한 화면에서 바로 확인할 수 있도록 정리한 안내입니다.</p>
+                    </div>
+
+                    <div class="help-layout">
+                        <section class="help-panel help-panel-primary">
+                            <p class="help-kicker">빠른 시작</p>
+                            <h4 class="help-panel-title">처음 사용할 때의 기본 흐름</h4>
+                            <p class="help-panel-text">설정을 저장한 뒤 메일을 동기화하고, 중요 스레드와 내 액션을 확인하면 기본 사용은 끝납니다.</p>
+                            <div class="help-step-list">
+                                <div class="help-step-item">
+                                    <span class="help-step-number">1</span>
+                                    <div>
+                                        <p class="help-step-title">환경 설정 입력</p>
+                                        <p class="help-step-text">메일 주소, 비밀번호, 메일함, 사용할 AI 제공처와 키를 등록합니다.</p>
+                                    </div>
+                                </div>
+                                <div class="help-step-item">
+                                    <span class="help-step-number">2</span>
+                                    <div>
+                                        <p class="help-step-title">메일 동기화</p>
+                                        <p class="help-step-text">대시보드에서 동기화 버튼으로 최신 메일을 불러옵니다.</p>
+                                    </div>
+                                </div>
+                                <div class="help-step-item">
+                                    <span class="help-step-number">3</span>
+                                    <div>
+                                        <p class="help-step-title">중요 메일 확인</p>
+                                        <p class="help-step-text">AI가 정리한 요약과 내 액션 항목을 확인합니다.</p>
+                                    </div>
+                                </div>
+                                <div class="help-step-item">
+                                    <span class="help-step-number">4</span>
+                                    <div>
+                                        <p class="help-step-title">반복 발송 등록</p>
+                                        <p class="help-step-text">정기 안내 메일은 자동발송 탭에서 템플릿으로 저장합니다.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+
+                        <div class="help-side-stack">
+                            <section class="help-panel help-panel-compact">
+                                <p class="help-kicker">프로그램 안내</p>
+                                <h4 class="help-panel-title">문의처와 지원 창구</h4>
+                                <p class="help-panel-text">설정이나 동기화 문제는 담당자 연락처를 기준으로 바로 확인할 수 있도록 정리했습니다.</p>
+                                <div class="help-meta-grid">
+                                    <div class="help-meta-card">
+                                        <p class="help-meta-label">담당자</p>
+                                        <p class="help-meta-value">SQA팀 남광현 선임</p>
+                                    </div>
+                                    <div class="help-meta-card">
+                                        <p class="help-meta-label">연락처</p>
+                                        <p class="help-meta-value"><a href="mailto:nkh92@hanlim.com">nkh92@hanlim.com</a></p>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section class="help-panel help-panel-compact">
+                                <p class="help-kicker">핵심 기능</p>
+                                <h4 class="help-panel-title">자주 쓰는 화면 구성</h4>
+                                <p class="help-panel-text">메일 브리프에서 우선순위를 보고, 자동발송과 로그/설정으로 이어지는 기본 동선을 빠르게 파악할 수 있습니다.</p>
+                                <div class="help-feature-list">
+                                    <div class="help-feature-item">
+                                        <p class="help-feature-name">대시보드</p>
+                                        <p class="help-feature-value">중요 메일, 현재 결론, 일정, 내 액션을 한 화면에서 확인합니다.</p>
+                                    </div>
+                                    <div class="help-feature-item">
+                                        <p class="help-feature-name">자동발송</p>
+                                        <p class="help-feature-value">반복 메일과 정기 안내 메일을 템플릿과 일정으로 관리합니다.</p>
+                                    </div>
+                                    <div class="help-feature-item">
+                                        <p class="help-feature-name">로그 / 설정</p>
+                                <p class="help-feature-value">발송 결과, 실행 로그, 메일 계정과 AI 자격 증명을 함께 관리합니다.</p>
+                                    </div>
+                                </div>
+                            </section>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AUTO-SEND VIEW -->
+            <div id="view-autosend"
+                class="view-section flex flex-col flex-1 w-full content-shell min-h-0 overflow-hidden relative">
+                <div class="w-full max-w-[1440px] mx-auto h-full flex flex-col content-stack min-h-0">
+                    <div
+                        class="view-heading flex flex-col xl:flex-row justify-between items-start xl:items-center gap-3 shrink-0">
+                        <h3 class="view-title text-2xl font-extrabold tracking-tight">템플릿 자동발송</h3>
+                        <div class="flex flex-wrap gap-2">
+                            <span id="sched-status"
+                                class="px-3 py-1.5 bg-slate-100 border text-slate-600 rounded-lg text-xs font-bold flex items-center gap-1"><span
+                                    class="material-symbols-outlined text-[14px]">||</span> 일시중지</span>
+                            <button onclick="schedCmd('pause')"
+                                class="px-3 py-1.5 bg-orange-100 text-orange-700 rounded-lg text-xs font-bold border border-orange-200">전체
+                                일시중지</button>
+                            <button onclick="schedCmd('resume')"
+                                class="px-3 py-1.5 bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold border border-emerald-200">전체
+                                시작</button>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-col 2xl:flex-row gap-4 md:gap-6 flex-1 min-h-0 overflow-hidden">
+                        <!-- Left: List -->
+                        <div
+                            class="w-full 2xl:w-[360px] 2xl:min-w-[320px] 2xl:max-w-[380px] flex flex-col bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm h-full max-h-[280px] 2xl:max-h-none">
+                            <div class="bg-slate-50 border-b px-4 py-3 flex items-center shrink-0">
+                                <span class="font-bold text-sm">템플릿 목록</span>
+                            </div>
+                            <div class="flex-1 overflow-y-auto p-3 space-y-2" id="template-list-container"></div>
+                        </div>
+
+                        <!-- Right: Editor -->
+                        <div class="flex-1 min-w-0 flex flex-col bg-white border border-slate-200 rounded-xl overflow-y-auto shadow-sm p-5 relative"
+                            id="template-editor-container">
+                            <input type="hidden" id="tpl_id" value="" />
+                            <input type="hidden" id="tpl_template_id" value="" />
+                            <input type="hidden" id="tpl_registration_id" value="" />
+                            <div
+                                class="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-3 mb-4 border-b pb-3">
+                                <h4 class="font-bold text-lg" id="tpl_header_title">새 템플릿 작성</h4>
+                                <div class="flex flex-wrap gap-2 items-center">
+                                    <button id="tpl_new_btn" type="button" onclick="newTemplate()"
+                                        class="bg-slate-100 text-slate-700 text-xs px-4 py-2.5 rounded-lg font-bold border border-slate-200">새
+                                        템플릿</button>
+                                    <button id="tpl_test_send_btn" type="button" onclick="testSendRegistration()"
+                                        class="bg-emerald-50 text-emerald-700 text-xs px-4 py-2.5 rounded-lg font-bold border border-emerald-200">지금
+                                        테스트 발송</button>
+                                    <button id="tpl_save_mail_btn" type="button" onclick="saveMailTemplate()"
+                                        class="bg-slate-900 text-white text-xs px-4 py-2.5 rounded-lg font-bold">메일 템플릿
+                                        저장</button>
+                                    <button id="tpl_save_registration_btn" type="button"
+                                        onclick="saveSendRegistration()"
+                                        class="bg-primary text-white text-xs px-4 py-2.5 rounded-lg font-bold">발송 등록
+                                        저장</button>
+                                    <label
+                                        class="text-sm font-bold text-slate-600 flex items-center gap-1 cursor-pointer"><input
+                                            type="checkbox" id="tpl_enabled" checked
+                                            class="rounded border-slate-300 text-primary"> 활성화</label>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
+                                <div><label class="block text-xs font-bold text-slate-500 mb-1">이름</label><input
+                                        type="text" id="tpl_name"
+                                        class="w-full border border-slate-300 rounded-lg bg-slate-50 px-3 py-2.5 text-sm" />
+                                </div>
+                                <div><label class="block text-xs font-bold text-slate-500 mb-1">제목</label><input
+                                        type="text" id="tpl_subject"
+                                        class="w-full border border-slate-300 rounded-lg bg-slate-50 px-3 py-2.5 text-sm" />
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-bold text-slate-500 mb-1">받는 사람 (To) - 이름 또는
+                                        메일주소</label>
+                                    <div class="relative">
+                                        <input type="text" id="tpl_to" autocomplete="off"
+                                            class="w-full border border-slate-300 rounded-lg bg-slate-50 px-3 py-2.5 text-sm" />
+                                        <div id="tpl_to_suggestions"
+                                            class="recipient-suggestions hidden absolute left-0 right-0 top-[calc(100%+6px)] z-30 rounded-lg border border-slate-200 bg-white shadow-xl">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-bold text-slate-500 mb-1">참조 (Cc)</label>
+                                    <div class="relative">
+                                        <input type="text" id="tpl_cc" autocomplete="off"
+                                            class="w-full border border-slate-300 rounded-lg bg-slate-50 px-3 py-2.5 text-sm" />
+                                        <div id="tpl_cc_suggestions"
+                                            class="recipient-suggestions hidden absolute left-0 right-0 top-[calc(100%+6px)] z-30 rounded-lg border border-slate-200 bg-white shadow-xl">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-4 bg-slate-50 p-3 rounded-lg border">
+                                <div><label class="block text-xs font-bold text-slate-500 mb-1">반복</label><select
+                                        id="tpl_repeat"
+                                        class="w-full border border-slate-300 rounded-lg bg-white px-3 py-2.5 text-sm">
+                                        <option value="none">1회</option>
+                                        <option value="daily">매일</option>
+                                        <option value="weekly">매주</option>
+                                        <option value="monthly">매월</option>
+                                    </select></div>
+                                <div><label class="block text-xs font-bold text-slate-500 mb-1">첫 발송 일시</label><input
+                                        type="datetime-local" step="60" id="tpl_first"
+                                        class="w-full border border-slate-300 rounded-lg bg-white px-3 py-2.5 text-sm" />
+                                </div>
+                                <div><label class="block text-xs font-bold text-slate-500 mb-1">발송 시간</label><input
+                                        type="time" step="60" id="tpl_time"
+                                        class="w-full border border-slate-300 rounded-lg bg-white px-3 py-2.5 text-sm" />
+                                </div>
+                            </div>
+
+                            <div class="mb-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                                <div class="flex flex-col gap-1">
+                                    <span class="text-xs font-bold text-slate-500">발송 전 확인</span>
+                                    <div class="text-sm font-semibold text-slate-800" id="tpl_next_run_preview">다음 실행을 계산하는 중...</div>
+                                    <div class="text-xs text-slate-500" id="tpl_validation_hint">받는 사람, 첫 발송 일시, 발송 시간을 입력하면 저장 전에 바로 확인할 수 있습니다.</div>
+                                </div>
+                            </div>
+
+                            <div class="mb-4 space-y-3">
+                                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                                    <label class="block text-xs font-bold text-slate-500">첨부파일</label>
+                                    <div class="flex flex-wrap gap-2">
+                                        <button type="button" onclick="pickAttachmentFiles()"
+                                            class="px-3 py-2 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-700 hover:border-primary hover:text-primary">
+                                            파일 선택
+                                        </button>
+                                        <button type="button" onclick="clearAttachmentFiles()"
+                                            class="px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-xs font-bold text-slate-500 hover:border-slate-300 hover:text-slate-700">
+                                            모두 지우기
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="tpl_attachment_dropzone"
+                                    class="rounded-xl border border-dashed border-slate-300 bg-slate-50/80 px-4 py-4 text-sm text-slate-500 transition-colors">
+                                    <div class="font-semibold text-slate-700">파일을 여기로 끌어다 놓으세요</div>
+                                    <div class="text-xs text-slate-500 mt-1">파일 선택 버튼으로 추가하거나 드래그 앤 드롭으로 경로를 입력할 수 있습니다.
+                                    </div>
+                                </div>
+                                <input type="text" id="tpl_att" placeholder="선택한 파일 경로가 표시됩니다. 필요하면 직접 수정할 수 있습니다."
+                                    class="w-full border border-slate-300 rounded-lg bg-slate-50 px-3 py-2.5 text-sm" />
+                                <div id="tpl_attachment_list" class="flex flex-wrap gap-2"></div>
+                            </div>
+
+                            <div class="flex-1 flex flex-col min-h-[300px]">
+                                <label class="block text-xs font-bold text-slate-500 mb-1">본문</label>
+                                <textarea id="tpl_body"
+                                    class="w-full flex-1 border border-slate-300 rounded-lg bg-slate-50 px-3 py-3 text-sm resize-none"></textarea>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+    <script src="ui_patch.js"></script>
+</body>
+
+</html>
+
+
+
+
+

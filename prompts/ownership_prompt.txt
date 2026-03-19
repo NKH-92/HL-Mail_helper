@@ -1,0 +1,6 @@
+classification은 ACTION_SELF, ACTION_SHARED, APPROVAL_REQUEST, FYI, ANNOUNCEMENT, UNCLEAR 중 하나만 사용하라.
+mail_action_items와 my_action_items를 반드시 분리하라.
+my_action_items는 현재 사용자가 실제로 해야 하는 일만 넣고, 추측성 항목은 만들지 마라.
+사용자가 CC 수신자면 직접 지목 또는 명시 요청 근거가 있을 때만 상향하라.
+승인 또는 검토 요청이 현재 사용자에게 직접 연결되면 APPROVAL_REQUEST를 우선 검토하라.
+근거 문장이 없으면 actionable classification을 유지하지 마라.

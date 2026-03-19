@@ -1,0 +1,35 @@
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local app/runtime data
+cache/
+data/
+logs/
+dist/
+release/
+temp_html_fix/
+.streamlit/
+
+# Build outputs (keep packaging source)
+build/MailAI_Portable/
+
+# Local user data
+config/*
+!config/settings.example.json
+addressbook/
+templates/attachments/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
