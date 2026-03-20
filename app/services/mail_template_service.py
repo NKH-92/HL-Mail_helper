@@ -12,10 +12,16 @@ from app.db.repositories import MailTemplateRepository
 class MailTemplateService:
     """Manage saved mail form presets."""
 
-    def __init__(self, mail_template_repository: MailTemplateRepository, portable_root: Path) -> None:
+    def __init__(
+        self,
+        mail_template_repository: MailTemplateRepository,
+        portable_root: Path,
+        *,
+        attachments_subdir: str | Path = Path("templates") / "presets",
+    ) -> None:
         self.mail_template_repository = mail_template_repository
         self.portable_root = portable_root
-        self.attachments_root = portable_root / "templates" / "presets"
+        self.attachments_root = portable_root / Path(attachments_subdir)
         self.attachments_root.mkdir(parents=True, exist_ok=True)
 
     def save_template(self, template: MailTemplate) -> int:
@@ -113,7 +119,11 @@ class MailTemplateService:
         path = Path(path_value).expanduser()
         if path.is_absolute():
             return path.resolve()
-        return (self.portable_root / path).resolve()
+        primary = (self.portable_root / path).resolve()
+        if primary.exists() or (path.parts and path.parts[0].lower() == "cache"):
+            return primary
+        fallback = (self.portable_root / "cache" / path).resolve()
+        return fallback if fallback.exists() else primary
 
     @staticmethod
     def _is_within_directory(path: Path, directory: Path) -> bool:

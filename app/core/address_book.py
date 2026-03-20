@@ -21,6 +21,8 @@ EMAIL_HEADERS = ("e-메일주소", "이메일", "메일주소", "email", "e-mail
 MOBILE_HEADERS = ("휴대전화", "휴대폰", "mobile")
 PHONE_HEADERS = ("회사전화", "전화", "phone")
 COMPANY_HEADERS = ("회사", "company")
+ALIASES_HEADERS = ("별칭메일", "추가메일", "aliases", "alias_emails", "alternate_emails")
+GROUP_ALIASES_HEADERS = ("그룹메일", "부서메일", "group_aliases", "owned_groups", "team_aliases", "shared_mailboxes")
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +34,8 @@ class AddressBookEntry:
     company: str = ""
     mobile_phone: str = ""
     office_phone: str = ""
+    aliases: tuple[str, ...] = ()
+    group_aliases: tuple[str, ...] = ()
 
     @property
     def display_label(self) -> str:
@@ -41,13 +45,25 @@ class AddressBookEntry:
         return f"{self.name} <{self.email}>"
 
 
+@dataclass(frozen=True, slots=True)
+class RecipientRoutingProfile:
+    direct_addresses: tuple[str, ...] = ()
+    cc_only_addresses: tuple[str, ...] = ()
+
+
 class AddressBookService:
     """Load contacts from portable CSV files and resolve emails on demand."""
 
-    def __init__(self, data_root: Path, bundle_root: Path | None = None) -> None:
+    def __init__(
+        self,
+        data_root: Path,
+        bundle_root: Path | None = None,
+        *,
+        addressbook_subdir: str | Path = "addressbook",
+    ) -> None:
         self.data_root = data_root
         self.bundle_root = bundle_root
-        self.addressbook_root = data_root / "addressbook"
+        self.addressbook_root = data_root / Path(addressbook_subdir)
         self.addressbook_root.mkdir(parents=True, exist_ok=True)
         self._cached_file_key: tuple[str, int] | None = None
         self._cached_entries: list[AddressBookEntry] = []
@@ -142,6 +158,56 @@ class AddressBookService:
         if contact is None:
             return "", ""
         return contact.department, contact.title
+
+    def resolve_user_routing_profile(self, config: AppConfig) -> RecipientRoutingProfile:
+        """Return recipient addresses that should count as TO vs CC for the current user."""
+
+        self.list_entries()
+        direct_addresses: list[str] = []
+        cc_only_addresses: list[str] = []
+        self._append_entry_routing_addresses(
+            direct_addresses,
+            cc_only_addresses,
+            AddressBookEntry(
+                name=config.user_display_name,
+                email=config.user_email,
+                department=config.user_department,
+                title=config.user_job_title,
+            ),
+        )
+
+        contact = self.get_contact(config.user_email)
+        if contact is not None:
+            self._append_entry_routing_addresses(direct_addresses, cc_only_addresses, contact)
+
+        normalized_name = _normalize_key(contact.name if contact else config.user_display_name)
+        normalized_department = _normalize_key(contact.department if contact else config.user_department)
+        normalized_title = _normalize_key(contact.title if contact else config.user_job_title)
+
+        for entry in self._cached_entries:
+            if entry.email == (contact.email if contact else config.user_email):
+                continue
+            if not normalized_name or _normalize_key(entry.name) != normalized_name:
+                continue
+            if normalized_department and _normalize_key(entry.department) != normalized_department:
+                continue
+            if normalized_title and _normalize_key(entry.title) != normalized_title:
+                continue
+            self._append_entry_routing_addresses(direct_addresses, cc_only_addresses, entry)
+        return RecipientRoutingProfile(
+            direct_addresses=tuple(direct_addresses),
+            cc_only_addresses=tuple(cc_only_addresses),
+        )
+
+    def resolve_user_address_aliases(self, config: AppConfig) -> list[str]:
+        """Backward-compatible flattened address list for the current user."""
+
+        profile = self.resolve_user_routing_profile(config)
+        resolved = list(profile.direct_addresses)
+        for address in profile.cc_only_addresses:
+            if address not in resolved:
+                resolved.append(address)
+        return resolved
 
     def resolve_recipient_tokens(self, raw_value: str) -> list[str]:
         resolved: list[str] = []
@@ -239,10 +305,27 @@ class AddressBookService:
                 company=_row_value(row, COMPANY_HEADERS),
                 mobile_phone=_row_value(row, MOBILE_HEADERS),
                 office_phone=_row_value(row, PHONE_HEADERS),
+                aliases=tuple(_split_alias_tokens(_row_value(row, ALIASES_HEADERS))),
+                group_aliases=tuple(_split_alias_tokens(_row_value(row, GROUP_ALIASES_HEADERS))),
             )
             entries_by_email[email] = entry
 
         return sorted(entries_by_email.values(), key=lambda entry: (entry.name, entry.email))
+
+    @staticmethod
+    def _append_entry_routing_addresses(
+        direct_addresses: list[str],
+        cc_only_addresses: list[str],
+        entry: AddressBookEntry,
+    ) -> None:
+        for address in (entry.email, *entry.aliases):
+            normalized = _normalize_email(address)
+            if normalized and normalized not in direct_addresses:
+                direct_addresses.append(normalized)
+        for address in entry.group_aliases:
+            normalized = _normalize_email(address)
+            if normalized and normalized not in direct_addresses and normalized not in cc_only_addresses:
+                cc_only_addresses.append(normalized)
 
 
 def _read_csv_rows(csv_path: Path) -> list[dict[str, str]]:
@@ -279,5 +362,19 @@ def _normalize_key(value: str | None) -> str:
     return re.sub(r"\s+", "", (value or "").strip().lower())
 
 
+def _normalize_email(value: str | None) -> str:
+    return str(value or "").strip().lower()
+
+
 def _split_recipient_tokens(raw_value: str) -> list[str]:
     return [token.strip() for token in re.split(r"[,;\n]+", raw_value or "") if token.strip()]
+
+
+def _split_alias_tokens(raw_value: str) -> list[str]:
+    resolved: list[str] = []
+    for token in _split_recipient_tokens(raw_value):
+        _, parsed_email = parseaddr(token)
+        normalized = _normalize_email(parsed_email or token)
+        if normalized and "@" in normalized and normalized not in resolved:
+            resolved.append(normalized)
+    return resolved

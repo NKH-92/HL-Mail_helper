@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import zlib
 
 from app.db.models import MailRecord
+from app.ai.embedded_prompts import BUILTIN_PROMPTS
 
 
 class PromptManager:
-    """Load prompt text files from the portable prompt directory."""
+    """Load prompt text with optional disk overrides and built-in defaults."""
 
     def __init__(self, prompt_dir: Path, fallback_prompt_dir: Path | None = None) -> None:
         self.prompt_dir = prompt_dir
@@ -25,10 +27,10 @@ class PromptManager:
             fallback_path = self.fallback_prompt_dir / file_name
             if fallback_path.exists():
                 return fallback_path.read_text(encoding="utf-8").strip()
-        return ""
+        return BUILTIN_PROMPTS.get(file_name, "").strip()
 
     def build_system_prompt(self) -> str:
-        """Return the shared system prompt."""
+        """Return the shared first-pass system prompt."""
 
         signature = self._build_prompt_signature(
             ["classify_prompt.txt", "summarize_prompt.txt", "ownership_prompt.txt"],
@@ -41,16 +43,86 @@ class PromptManager:
             self._read("summarize_prompt.txt"),
             self._read("ownership_prompt.txt"),
             (
-                "출력은 반드시 JSON 객체 하나만 사용하라. "
-                "summary_3lines, evidence, action_type는 배열이며 "
-                "classification과 action_owner는 지정 enum만 사용하라. "
-                "due_date는 정규화 가능할 때만 넣고, deadline_raw는 원문 표현을 유지하라. "
-                "confidence는 0과 1 사이 숫자다."
+                "# FIRST-PASS OUTPUT CONTRACT\n"
+                "Return JSON only.\n"
+                "Do not return markdown, prose, comments, or code fences.\n"
+                "Do not return final_category in this pass. The upstream decision engine computes final_category "
+                "from routing facts and your semantic result.\n"
+                "All fields below must be present and enum values must match exactly.\n\n"
+                "{\n"
+                '  "request_present": boolean,\n'
+                '  "request_target": "me" | "other" | "group" | "unknown",\n'
+                '  "request_target_is_me": boolean,\n'
+                '  "action_types": ["REPLY" | "REVIEW" | "APPROVE" | "SUBMIT" | "MODIFY" | "SCHEDULE" | '
+                '"FOLLOW_UP" | "DECIDE" | "NONE"],\n'
+                '  "due_date": string | null,\n'
+                '  "urgency": "high" | "medium" | "low" | "none" | "unknown",\n'
+                '  "llm_category": 1 | 2 | 3,\n'
+                '  "evidence": [string],\n'
+                '  "summary": string,\n'
+                '  "confidence": number\n'
+                "}\n\n"
+                "Consistency rules:\n"
+                "- If request_present=false, action_types should be [\"NONE\"], llm_category must be 3, and urgency "
+                "should usually be \"none\".\n"
+                "- If request_target_is_me=true, llm_category should be 1.\n"
+                "- If the user is only in Cc but explicitly named as the acting person, request_target must be \"me\".\n"
+                "- Never change routing facts such as is_to_me, is_cc_me, or recipient_role.\n"
+                "- Evidence must be the smallest set of short quotes needed to justify the decision."
             ),
         ]
         self._cached_system_prompt_signature = signature
         self._cached_system_prompt = "\n\n".join(part for part in parts if part)
         return self._cached_system_prompt
+
+    def build_validation_system_prompt(self) -> str:
+        """Return the conditional second-pass validation prompt."""
+
+        return (
+            "You are a strict JSON validator and policy auditor for an email action classification system.\n\n"
+            "Your job is to review:\n"
+            "1) routing facts\n"
+            "2) original email content\n"
+            "3) a candidate JSON result\n\n"
+            "You must check whether the candidate result is logically consistent with the policy.\n"
+            "Treat routing facts as authoritative truth and do not override them.\n"
+            "You may correct semantic interpretation fields when evidence supports it.\n"
+            "Evidence must support the decision. Do not fabricate evidence.\n"
+            "Action types must only use the allowed enum values.\n"
+            "Return JSON only.\n"
+            "No markdown.\n"
+            "No comments.\n"
+            "No extra keys.\n\n"
+            "Required validator output schema:\n"
+            "{\n"
+            '  "is_valid": boolean,\n'
+            '  "corrected_result": {\n'
+            '    "request_present": boolean,\n'
+            '    "request_target": "me" | "other" | "group" | "unknown",\n'
+            '    "request_target_is_me": boolean,\n'
+            '    "action_types": ["REPLY" | "REVIEW" | "APPROVE" | "SUBMIT" | "MODIFY" | "SCHEDULE" | '
+            '"FOLLOW_UP" | "DECIDE" | "NONE"],\n'
+            '    "due_date": string | null,\n'
+            '    "urgency": "high" | "medium" | "low" | "none" | "unknown",\n'
+            '    "llm_category": 1 | 2 | 3,\n'
+            '    "final_category": 1 | 2 | 3,\n'
+            '    "evidence": [string],\n'
+            '    "summary": string,\n'
+            '    "confidence": number\n'
+            "  },\n"
+            '  "issues": [string]\n'
+            "}\n\n"
+            "Validation policy:\n"
+            "- final_category must exactly follow the required policy rules.\n"
+            "- request_present=false requires final_category=3.\n"
+            "- request_target_is_me=true requires final_category=1.\n"
+            "- request_present=true and is_to_me=true requires final_category=1.\n"
+            "- request_present=true and is_cc_me=true and is_to_me=false requires final_category=2 unless "
+            "request_target_is_me=true.\n"
+            "- If the email is short and vague, rely on thread_context when available.\n"
+            "- If an email mixes sharing language and request language, prioritize the real request when supported by evidence.\n"
+            "- summary must be one sentence and businesslike."
+        )
 
     def _build_prompt_signature(self, file_names: list[str]) -> tuple[tuple[str, int | None], ...]:
         signature: list[tuple[str, int | None]] = []
@@ -64,7 +136,8 @@ class PromptManager:
                 if fallback_path.exists():
                     signature.append((str(fallback_path.resolve()), fallback_path.stat().st_mtime_ns))
                     continue
-            signature.append((file_name, None))
+            builtin_prompt = BUILTIN_PROMPTS.get(file_name, "")
+            signature.append((f"builtin:{file_name}", zlib.crc32(builtin_prompt.encode("utf-8"))))
         return tuple(signature)
 
     def build_user_prompt(
@@ -74,108 +147,134 @@ class PromptManager:
         model_name: str = "",
         body_char_limit: int = 4000,
         current_user: dict[str, str] | None = None,
+        rule_context: dict[str, object] | None = None,
     ) -> str:
         """Render structured mail data into the user prompt."""
 
-        if model_name.strip().lower().startswith("gemma-"):
-            return self._build_gemma_prompt(
-                mail,
-                thread_summary,
-                body_char_limit=body_char_limit,
-                current_user=current_user or {},
-            )
+        del model_name
+        user = current_user or {}
+        rules = rule_context or {}
+        body_text = self._truncate_text(mail.body_text or mail.raw_preview, body_char_limit)
 
-        payload = {
-            "current_user": {
-                "email": (current_user or {}).get("email", ""),
-                "display_name": (current_user or {}).get("display_name", ""),
-                "department": (current_user or {}).get("department", ""),
-                "job_title": (current_user or {}).get("job_title", ""),
-            },
-            "subject": mail.subject,
-            "sender_name": mail.sender_name,
-            "sender_email": mail.sender_email,
-            "to": mail.to_list,
-            "cc": mail.cc_list,
-            "received_at": mail.received_at,
-            "attachment_names": mail.attachment_names,
-            "body_preview": mail.raw_preview[:body_char_limit],
-            "thread_summary": thread_summary,
-        }
-        instructions = {
-            "task": "회사 메일을 분석하여 지정 JSON 스키마로 반환",
-            "rule": [
-                "To/Cc 정보만으로 action_required를 단정하지 말 것",
-                "본문과 thread_summary에서 행동 요청, 책임 주체, 기한, 산출물을 확인할 것",
-                "근거가 부족하면 classification을 UNCLEAR로 두고 action_required는 false로 둘 것",
-                "evidence에는 본문 또는 thread_summary에서 직접 근거가 되는 문장/구절만 넣을 것",
-                "mail_action_items와 my_action_items를 분리하고, 추측성 할 일은 만들지 말 것",
-                "공유/참고는 FYI 또는 ANNOUNCEMENT로 보수 처리할 것",
-            ],
-        }
-        return json.dumps({"instructions": instructions, "mail": payload}, ensure_ascii=False, indent=2)
+        return (
+            "Analyze the following email for the target user.\n\n"
+            "[target_user]\n"
+            f"- name: {self._format_inline_value(user.get('display_name'))}\n"
+            f"- title: {self._format_inline_value(user.get('job_title'))}\n"
+            f"- email: {self._format_inline_value(user.get('email'))}\n\n"
+            "[routing_facts]\n"
+            f"- is_to_me: {self._format_bool(rules.get('is_to_me'))}\n"
+            f"- is_cc_me: {self._format_bool(rules.get('is_cc_me'))}\n"
+            f"- recipient_role: {self._format_inline_value(rules.get('recipient_role') or 'NONE')}\n\n"
+            "[sender]\n"
+            f"- sender_name: {self._format_inline_value(mail.sender_name)}\n"
+            f"- sender_email: {self._format_inline_value(mail.sender_email)}\n"
+            f"- sender_type: {self._format_inline_value(rules.get('sender_type') or 'external')}\n\n"
+            "[email]\n"
+            f"- subject: {self._format_inline_value(mail.subject)}\n"
+            "- body_text:\n"
+            f"{self._format_multiline_block(body_text)}\n\n"
+            "[attachments]\n"
+            f"{self._format_bullet_block(mail.attachment_names)}\n\n"
+            "[thread_context]\n"
+            f"{self._format_thread_context(thread_summary)}\n\n"
+            "[additional_instructions]\n"
+            "- Treat routing_facts as authoritative truth.\n"
+            "- Determine whether there is a real actionable request.\n"
+            "- Determine whether the request is directed to the target user.\n"
+            "- Return JSON only."
+        )
 
-    @staticmethod
-    def _build_gemma_prompt(
+    def build_validation_user_prompt(
+        self,
+        *,
         mail: MailRecord,
-        thread_summary: str,
-        body_char_limit: int = 4000,
+        thread_summary: str = "",
         current_user: dict[str, str] | None = None,
+        rule_context: dict[str, object] | None = None,
+        candidate_result: dict[str, object] | None = None,
+        body_char_limit: int = 4000,
     ) -> str:
-        """Return a simpler plain-text prompt for Gemma compatibility mode."""
+        """Render the validator-specific user prompt."""
 
         user = current_user or {}
-        return f"""
-        회사 메일을 분석해서 JSON 객체 하나만 출력하라.
-        설명문, 머리말, 코드블록, 마크다운을 붙이지 마라.
+        rules = rule_context or {}
+        body_text = self._truncate_text(mail.body_text or mail.raw_preview, body_char_limit)
+        candidate_json = json.dumps(candidate_result or {}, ensure_ascii=False, indent=2)
 
-        반드시 아래 키를 모두 포함하라.
-        - category: ACT/FYI/APR/SCH/QLT/ETC 중 하나
-        - priority: high/medium/low/unknown 중 하나
-        - classification: ACTION_SELF/ACTION_SHARED/APPROVAL_REQUEST/FYI/ANNOUNCEMENT/UNCLEAR 중 하나
-        - one_line_summary: 문자열
-        - summary_3lines: 문자열 배열 최대 3개
-        - mail_action_items: 문자열 배열
-        - my_action_required: true 또는 false
-        - my_action_status: direct_action/review_needed/reference_only 중 하나
-        - my_action_items: 문자열 배열
-        - action_owner: me/team/other/unknown 중 하나
-        - action_type: reply/review/approve/submit/prepare/attend/monitor/none 중 0개 이상 배열
-        - due_date: YYYY-MM-DD 또는 YYYY-MM-DD HH:MM:SS 또는 null
-        - deadline_raw: 원문 기한 표현 또는 null
-        - evidence: 직접 근거 문장 배열
-        - ownership_reason: 문자열 배열
-        - reason: 판정 이유 2~3문장
-        - suggested_task_title: 할일 제목 또는 null
-        - confidence: 0과 1 사이 숫자
+        return (
+            "Validate the candidate classification result.\n\n"
+            "[target_user]\n"
+            f"- name: {self._format_inline_value(user.get('display_name'))}\n"
+            f"- title: {self._format_inline_value(user.get('job_title'))}\n"
+            f"- email: {self._format_inline_value(user.get('email'))}\n\n"
+            "[routing_facts]\n"
+            f"- is_to_me: {self._format_bool(rules.get('is_to_me'))}\n"
+            f"- is_cc_me: {self._format_bool(rules.get('is_cc_me'))}\n"
+            f"- recipient_role: {self._format_inline_value(rules.get('recipient_role') or 'NONE')}\n\n"
+            "[sender]\n"
+            f"- sender_name: {self._format_inline_value(mail.sender_name)}\n"
+            f"- sender_email: {self._format_inline_value(mail.sender_email)}\n"
+            f"- sender_type: {self._format_inline_value(rules.get('sender_type') or 'external')}\n\n"
+            "[email]\n"
+            f"- subject: {self._format_inline_value(mail.subject)}\n"
+            "- body_text:\n"
+            f"{self._format_multiline_block(body_text)}\n\n"
+            "[attachments]\n"
+            f"{self._format_bullet_block(mail.attachment_names)}\n\n"
+            "[thread_context]\n"
+            f"{self._format_thread_context(thread_summary)}\n\n"
+            "[candidate_result]\n"
+            f"{candidate_json}\n\n"
+            "Return JSON only."
+        )
 
-        중요 규칙:
-        - 수신자 정보만으로 action_required를 단정하지 마라
-        - evidence는 반드시 본문 또는 최근 스레드 요약의 직접 문장을 사용하라
-        - 근거가 부족하면 classification=UNCLEAR, my_action_required=false로 둬라
-        - mail_action_items는 메일 전체에서 누군가 해야 하는 일
-        - my_action_items는 그중 사용자가 실제 해야 하는 일
-        - 사용자가 CC 수신자면 직접 지목/명시 요청 근거가 없을 때 보수적으로 판단하라
-        - 공유/참고는 FYI 또는 ANNOUNCEMENT로 처리하라
+    @staticmethod
+    def _format_bool(value: object) -> str:
+        return "true" if bool(value) else "false"
 
-        현재 사용자:
-        - 이메일: {user.get("email", "-") or "-"}
-        - 이름: {user.get("display_name", "-") or "-"}
-        - 부서: {user.get("department", "-") or "-"}
-        - 직책: {user.get("job_title", "-") or "-"}
+    @staticmethod
+    def _format_inline_value(value: object) -> str:
+        text = " ".join(str(value or "").split()).strip()
+        return text or "-"
 
-        메일 정보:
-        제목: {mail.subject}
-        발신자명: {mail.sender_name}
-        발신자메일: {mail.sender_email}
-To: {", ".join(mail.to_list) or "-"}
-Cc: {", ".join(mail.cc_list) or "-"}
-수신시각: {mail.received_at or "-"}
-첨부파일명: {", ".join(mail.attachment_names) or "-"}
+    @classmethod
+    def _format_multiline_block(cls, value: str) -> str:
+        text = value.strip() or "-"
+        return text
 
-최근 스레드 요약:
-{thread_summary or "-"}
+    @classmethod
+    def _format_bullet_block(cls, values: list[str]) -> str:
+        cleaned = [cls._format_inline_value(value) for value in values if cls._format_inline_value(value) != "-"]
+        if not cleaned:
+            return "- none"
+        return "\n".join(f"- {value}" for value in cleaned)
 
-본문 미리보기:
-{mail.raw_preview[:body_char_limit] or "-"}
-""".strip()
+    @classmethod
+    def _format_thread_context(cls, thread_summary: str) -> str:
+        lines = [line.strip() for line in str(thread_summary or "").splitlines() if line.strip()]
+        if not lines:
+            return "- none"
+        normalized: list[str] = []
+        for line in lines[:5]:
+            normalized.append(line if line.startswith("- ") else f"- {line}")
+        return "\n".join(normalized)
+
+    @staticmethod
+    def _truncate_text(value: str, limit: int) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return "-"
+        collapsed = text
+        if len(collapsed) <= limit:
+            return collapsed
+        if limit <= 240:
+            return f"{collapsed[: max(0, limit - 16)].rstrip()} [...]"
+
+        separator = "\n\n[... truncated ...]\n\n"
+        available = max(0, limit - len(separator))
+        head_length = max(120, int(available * 0.6))
+        tail_length = max(80, available - head_length)
+        if head_length + tail_length > len(collapsed):
+            return collapsed[:limit]
+        return f"{collapsed[:head_length].rstrip()}{separator}{collapsed[-tail_length:].lstrip()}"

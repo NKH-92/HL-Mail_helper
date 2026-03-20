@@ -88,4 +88,8 @@ class SMTPClient:
         path = Path(path_value).expanduser()
         if path.is_absolute() or self.storage_root is None:
             return path
-        return (self.storage_root / path).resolve()
+        primary = (self.storage_root / path).resolve()
+        if primary.exists() or (path.parts and path.parts[0].lower() == "cache"):
+            return primary
+        fallback = (self.storage_root / "cache" / path).resolve()
+        return fallback if fallback.exists() else primary

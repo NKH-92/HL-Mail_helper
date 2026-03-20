@@ -186,6 +186,47 @@ class SendTemplatePersistenceTests(unittest.TestCase):
         finally:
             shutil.rmtree(portable_root, ignore_errors=True)
 
+    def test_template_service_reads_legacy_relative_paths_after_cache_relocation(self) -> None:
+        portable_root = Path(tempfile.mkdtemp())
+        try:
+            legacy_relative_path = Path("templates") / "attachments" / "legacy.txt"
+            relocated_path = portable_root / "cache" / legacy_relative_path
+            relocated_path.parent.mkdir(parents=True, exist_ok=True)
+            relocated_path.write_text("attachment", encoding="utf-8")
+
+            database = DatabaseManager(portable_root / "app.db")
+            repository = TemplateRepository(database)
+            service = TemplateService(
+                repository,
+                portable_root=portable_root,
+                attachments_subdir=Path("cache") / "templates" / "attachments",
+            )
+
+            template_id = service.save_template(
+                SendTemplate(
+                    id=None,
+                    template_name="Weekly Notice",
+                    subject="Subject",
+                    body="Body",
+                    to_list=["to@example.com"],
+                    cc_list=[],
+                    attachment_paths=[legacy_relative_path.as_posix()],
+                    repeat_type="none",
+                    send_time="09:00",
+                    first_send_at="2026-03-09 09:00:00",
+                    enabled=True,
+                )
+            )
+
+            saved = service.get_template(template_id)
+
+            self.assertIsNotNone(saved)
+            assert saved is not None
+            self.assertTrue(saved.attachment_paths[0].startswith(f"cache/templates/attachments/template_{template_id}/"))
+            self.assertTrue((portable_root / saved.attachment_paths[0]).exists())
+        finally:
+            shutil.rmtree(portable_root, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

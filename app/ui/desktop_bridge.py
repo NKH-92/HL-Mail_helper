@@ -23,20 +23,17 @@ from app.ui.page_config import (
     resolve_page_id,
 )
 from app.ui.ui_state_helpers import (
-    DASHBOARD_THREAD_PAGE_SIZE,
     build_follow_up_mail_template,
-    build_dashboard_thread_page_state,
-    build_completed_task_dicts,
-    build_dashboard_task_dicts,
+    build_classified_mail_dicts,
+    build_dashboard_mail_category_counts,
     build_mail_template_from_payload,
     build_mailbox_test_submission,
-    build_priority_thread_dicts,
     build_send_registration_from_payload,
     build_settings_submission,
     build_sync_status_dict,
     format_mailbox_cycle_message,
-    normalize_dashboard_thread_filter,
-    normalize_dashboard_thread_page,
+    normalize_dashboard_mail_tab,
+    normalize_dashboard_mail_view,
     read_log_tail,
     validate_send_template,
 )
@@ -52,11 +49,10 @@ class DesktopViewState:
     """Transient UI state for the desktop shell."""
 
     current_page: str = DASHBOARD_PAGE
-    dashboard_task_tab: str = "open"
-    dashboard_thread_filter: str = "all"
-    dashboard_thread_page: int = 1
+    dashboard_mail_tab: str = "category_1"
+    dashboard_mail_view: str = "list"
     mailbox_candidates: list[str] = field(default_factory=list)
-    selected_thread_key: str = ""
+    selected_mail_id: int = 0
     selected_mail_template_id: int = 0
     selected_send_registration_id: int = 0
     flash_message: str | None = None
@@ -125,16 +121,13 @@ class DesktopApi:
             should_apply_client_state = client_state_version >= self.state.last_client_state_version
             if should_apply_client_state:
                 self.state.last_client_state_version = client_state_version
-                if client_state.get("dashboard_task_tab") in {"open", "completed"}:
-                    self.state.dashboard_task_tab = str(client_state["dashboard_task_tab"])
-                self.state.dashboard_thread_filter = normalize_dashboard_thread_filter(
-                    client_state.get("dashboard_thread_filter"),
+                self.state.dashboard_mail_tab = normalize_dashboard_mail_tab(
+                    client_state.get("dashboard_mail_tab"),
                 )
-                self.state.dashboard_thread_page = normalize_dashboard_thread_page(
-                    client_state.get("dashboard_thread_page"),
-                    default=self.state.dashboard_thread_page,
+                self.state.dashboard_mail_view = normalize_dashboard_mail_view(
+                    client_state.get("dashboard_mail_view"),
                 )
-                self.state.selected_thread_key = str(client_state.get("selected_thread_key") or "").strip()
+                self.state.selected_mail_id = _normalize_positive_int(client_state.get("selected_mail_id"))
 
             requested_page = _normalize_page(
                 str(
@@ -312,12 +305,18 @@ class DesktopApi:
             checked = bool(payload.get("checked"))
             if task_id:
                 mail_id = self.context.mail_repository.mark_action_item_done(task_id, checked)
-                self.state.dashboard_task_tab = "completed" if checked else "open"
                 if mail_id and checked and self.context.mail_repository.count_open_action_items(mail_id, "my") == 0:
                     self.context.mail_repository.update_status(mail_id, "done", sync_my_action_items=True)
                 elif mail_id and not checked:
                     self.context.mail_repository.update_status(mail_id, "doing")
             return
+
+            if action == "select_mail":
+                selected_mail_id = _normalize_positive_int(payload.get("mail_id"))
+                if selected_mail_id:
+                    self.state.selected_mail_id = selected_mail_id
+                    self.state.dashboard_mail_view = "detail"
+                return
 
         if action == "save_settings":
             next_config, pwd, api_key, hanlim_api_key = build_settings_submission(
@@ -520,40 +519,18 @@ class DesktopApi:
                 analysis_warning=self.context.mailbox_service.get_analysis_warning(),
                 backlog_counts=self.context.mail_repository.count_analysis_backlog(),
             )
-            thread_overviews = self.context.mail_repository.list_thread_overviews(
-                user_email=config.user_email,
-            )
-            paged_threads, pagination, filter_counts = build_dashboard_thread_page_state(
-                thread_overviews,
-                filter_key=self.state.dashboard_thread_filter,
-                page=self.state.dashboard_thread_page,
-                page_size=DASHBOARD_THREAD_PAGE_SIZE,
-            )
-            self.state.dashboard_thread_filter = str(pagination["filter"])
-            self.state.dashboard_thread_page = int(pagination["page"])
-            tasks = self.context.mail_repository.list_open_my_action_items()
-            completed_tasks = self.context.mail_repository.list_completed_my_action_items(limit=20)
-            component_args["priority_threads"] = build_priority_thread_dicts(
-                paged_threads,
-                mail_repository=self.context.mail_repository,
+            classified_mails = self.context.mail_repository.list_classified_mails(limit=200)
+            visible_mail_ids = [mail.id for mail in classified_mails]
+            if self.state.selected_mail_id not in visible_mail_ids:
+                self.state.selected_mail_id = visible_mail_ids[0] if visible_mail_ids else 0
+            component_args["classified_mails"] = build_classified_mail_dicts(
+                classified_mails,
                 address_book_service=self.context.address_book_service,
-                current_user_email=config.user_email,
-                include_details=False,
             )
-            visible_thread_keys = [
-                str(thread.thread_key)
-                for thread in paged_threads
-                if getattr(thread, "thread_key", "")
-            ]
-            if self.state.selected_thread_key not in visible_thread_keys:
-                self.state.selected_thread_key = visible_thread_keys[0] if visible_thread_keys else ""
-            component_args["tasks"] = build_dashboard_task_dicts(tasks)
-            component_args["completed_tasks"] = build_completed_task_dicts(completed_tasks)
-            component_args["task_tab"] = self.state.dashboard_task_tab
-            component_args["dashboard_thread_filter"] = self.state.dashboard_thread_filter
-            component_args["dashboard_thread_filter_counts"] = filter_counts
-            component_args["dashboard_thread_pagination"] = pagination
-            component_args["selected_thread_key"] = self.state.selected_thread_key
+            component_args["dashboard_mail_tab"] = self.state.dashboard_mail_tab
+            component_args["dashboard_mail_view"] = self.state.dashboard_mail_view
+            component_args["dashboard_mail_category_counts"] = build_dashboard_mail_category_counts(classified_mails)
+            component_args["selected_mail_id"] = self.state.selected_mail_id
 
         elif current_page == AUTO_SEND_PAGE:
             mail_templates = self.context.mail_template_service.list_templates()
@@ -617,54 +594,7 @@ class DesktopApi:
         return component_args
 
     def _build_todo_popup_html(self) -> str:
-        todos = self.context.mail_repository.list_open_my_action_items()
-        now = datetime.now()
-        today = now.date()
-        overdue_count = 0
-        due_today_count = 0
-        cards: list[str] = []
-
-        for item in todos:
-            due_value = _parse_datetime(item.due_date)
-            if due_value is not None:
-                if due_value.date() < today:
-                    overdue_count += 1
-                elif due_value.date() == today:
-                    due_today_count += 1
-
-            due_label, due_class = _due_chip(item.due_date)
-            sender_name = self.context.address_book_service.resolve_display_name(item.sender_email, item.sender_email)
-            cards.append(
-                (
-                    "<div class='tray-popup-card'>"
-                    "<div class='tray-popup-row'>"
-                    "<div class='tray-popup-card-main'>"
-                    f"<div class='tray-popup-name'>{escape(item.action_text or '할일')}</div>"
-                    f"<div class='tray-popup-subject'>{escape(item.mail_subject or '(제목 없음)')}</div>"
-                    f"<div class='tray-popup-meta'>보낸 사람 {escape(sender_name)}</div>"
-                    f"<div class='tray-popup-meta'>수신 {_format_datetime(item.received_at)}</div>"
-                    "</div>"
-                    f"<div class='tray-popup-chip {due_class}'>{escape(due_label)}</div>"
-                    "</div>"
-                    "</div>"
-                )
-            )
-
-        summary = (
-            "<div class='tray-popup-metrics'>"
-            f"{_metric_card('열린 할일', len(todos))}"
-            f"{_metric_card('오늘 마감', due_today_count)}"
-            f"{_metric_card('지연', overdue_count)}"
-            f"{_metric_card('새로고침', now.strftime('%Y-%m-%d %H:%M'))}"
-            "</div>"
-        )
-        body = (
-            f"{_popup_header('트레이', '내 할일', '메인 창을 열지 않고도 열린 할일과 마감 상태를 빠르게 확인합니다.')}"
-            f"{summary}"
-            f"{_popup_refresh_bar(TRAY_TODO_POPUP)}"
-            + ("".join(cards) if cards else "<div class='tray-popup-empty'>열린 할일이 없습니다.</div>")
-        )
-        return self._wrap_popup_html("MailAI | 내 할일", body, TRAY_TODO_POPUP)
+        return _desktop_api_build_todo_popup_html_v2(self)
 
     def _build_autosend_popup_html(self) -> str:
         templates = self.context.template_service.list_templates()
@@ -1101,35 +1031,216 @@ def _popup_refresh_bar_v2() -> str:
     )
 
 
+_POPUP_CATEGORY_LABELS = {
+    1: "내가해야할일",
+    2: "내가검토할일",
+    3: "단순 참고용",
+}
+_POPUP_CATEGORY_CHIP_CLASSES = {
+    1: "is-danger",
+    2: "is-warn",
+    3: "is-muted",
+}
+_POPUP_ACTION_LABELS = {
+    "REPLY": "회신",
+    "REVIEW": "검토",
+    "APPROVE": "승인",
+    "SUBMIT": "제출",
+    "MODIFY": "수정",
+    "SCHEDULE": "일정",
+    "FOLLOW_UP": "후속",
+    "DECIDE": "결정",
+}
+
+
+def _build_popup_classified_mail_payload(
+    context: AppContext,
+    *,
+    visible_limit: int | None = None,
+    count_limit: int = 200,
+) -> tuple[list[dict[str, object]], dict[str, int]]:
+    mails = context.mail_repository.list_classified_mails(limit=count_limit)
+    counts = build_dashboard_mail_category_counts(mails)
+    if visible_limit is not None:
+        mails = mails[: max(0, int(visible_limit))]
+    return (
+        build_classified_mail_dicts(
+            mails,
+            address_book_service=context.address_book_service,
+        ),
+        counts,
+    )
+
+
+def _popup_category_label(final_category: object) -> str:
+    try:
+        category = int(final_category)
+    except (TypeError, ValueError):
+        category = 3
+    return _POPUP_CATEGORY_LABELS.get(category, _POPUP_CATEGORY_LABELS[3])
+
+
+def _popup_category_chip_class(final_category: object) -> str:
+    try:
+        category = int(final_category)
+    except (TypeError, ValueError):
+        category = 3
+    return _POPUP_CATEGORY_CHIP_CLASSES.get(category, _POPUP_CATEGORY_CHIP_CLASSES[3])
+
+
+def _popup_category_card_class(final_category: object) -> str:
+    try:
+        category = int(final_category)
+    except (TypeError, ValueError):
+        category = 3
+    return f"is-category-{category if category in {1, 2, 3} else 3}"
+
+
+def _popup_category_tab_key(final_category: object) -> str:
+    try:
+        category = int(final_category)
+    except (TypeError, ValueError):
+        category = 3
+    normalized_category = category if category in {1, 2, 3} else 3
+    return f"category_{normalized_category}"
+
+
+def _popup_action_text(action_types: object) -> str:
+    if not isinstance(action_types, (list, tuple)):
+        return ""
+    labels: list[str] = []
+    for raw_value in action_types:
+        normalized = str(raw_value or "").strip().upper()
+        if not normalized or normalized == "NONE":
+            continue
+        labels.append(_POPUP_ACTION_LABELS.get(normalized, normalized))
+    return ", ".join(labels)
+
+
+def _build_popup_mail_card_html(mail: dict[str, object]) -> str:
+    final_category = int(mail.get("final_category") or 3)
+    summary = str(mail.get("summary") or mail.get("subject") or "메일")
+    subject = str(mail.get("subject") or "(제목 없음)")
+    sender = str(mail.get("sender") or "-")
+    received_at = str(mail.get("received_at") or "-")
+    due_date = str(mail.get("due_date") or "").strip()
+    action_text = _popup_action_text(mail.get("action_types"))
+    detail_bits = [f"분류 {_popup_category_label(final_category)}"]
+    if action_text:
+        detail_bits.append(f"액션 {action_text}")
+    if due_date:
+        detail_bits.append(f"기한 {due_date}")
+    if bool(mail.get("correction_applied")):
+        detail_bits.append("정책 보정")
+    chip_class = _popup_category_chip_class(final_category)
+    card_class = _popup_category_card_class(final_category)
+    return (
+        f"<div class='tray-popup-card {card_class}'>"
+        "<div class='tray-popup-row'>"
+        "<div class='tray-popup-card-main'>"
+        f"<div class='tray-popup-name'>{escape(summary)}</div>"
+        f"<div class='tray-popup-subject'>{escape(subject)}</div>"
+        f"<div class='tray-popup-meta'>보낸 사람 {escape(sender)} · 수신 {escape(received_at)}</div>"
+        f"<div class='tray-popup-meta'>{escape(' · '.join(detail_bits))}</div>"
+        "</div>"
+        f"<div class='tray-popup-chip {chip_class}'>{escape(_popup_category_label(final_category))}</div>"
+        "</div>"
+        "</div>"
+    )
+
+
+def _build_popup_tabbed_mail_sections(
+    classified_mails: list[dict[str, object]],
+    counts: dict[str, int],
+) -> str:
+    mails_by_tab = {
+        "category_1": [],
+        "category_2": [],
+        "category_3": [],
+    }
+    for mail in classified_mails:
+        mails_by_tab[_popup_category_tab_key(mail.get("final_category"))].append(mail)
+
+    tab_order = (
+        ("category_1", _POPUP_CATEGORY_LABELS[1]),
+        ("category_2", _POPUP_CATEGORY_LABELS[2]),
+        ("category_3", _POPUP_CATEGORY_LABELS[3]),
+    )
+    buttons: list[str] = []
+    panels: list[str] = []
+    for index, (tab_key, label) in enumerate(tab_order):
+        is_active = index == 0
+        active_class = " is-active" if is_active else ""
+        selected_attr = "true" if is_active else "false"
+        count = counts.get(tab_key, 0)
+        panel_cards = "".join(_build_popup_mail_card_html(mail) for mail in mails_by_tab[tab_key])
+        if not panel_cards:
+            panel_cards = "<div class='tray-popup-empty'>표시할 메일이 없습니다.</div>"
+        buttons.append(
+            (
+                "<button"
+                " type='button'"
+                f" class='tray-popup-tab-button{active_class}'"
+                f" data-popup-tab='{tab_key}'"
+                f" aria-selected='{selected_attr}'"
+                " role='tab'>"
+                f"<span>{escape(label)}</span>"
+                f"<span class='tray-popup-tab-count'>{count}</span>"
+                "</button>"
+            )
+        )
+        panels.append(
+            (
+                "<section"
+                f" class='tray-popup-tab-panel{active_class}'"
+                f" data-popup-tab-panel='{tab_key}'"
+                f" aria-hidden='{'false' if is_active else 'true'}'>"
+                f"{panel_cards}"
+                "</section>"
+            )
+        )
+
+    return (
+        "<div class='tray-popup-tab-shell' data-popup-tab-root>"
+        f"<div class='tray-popup-tab-list' role='tablist'>{''.join(buttons)}</div>"
+        f"{''.join(panels)}"
+        "</div>"
+    )
+
+
 def _desktop_api_build_todo_popup_html_v2(self: DesktopApi) -> str:
-    todos = self.context.mail_repository.list_open_my_action_items()
+    classified_mails, counts = _build_popup_classified_mail_payload(self.context)
     now = datetime.now()
-    today = now.date()
-    overdue_count = 0
-    due_today_count = 0
     cards: list[str] = []
 
-    for item in todos:
-        due_value = _parse_datetime(item.due_date)
-        if due_value is not None:
-            if due_value.date() < today:
-                overdue_count += 1
-            elif due_value.date() == today:
-                due_today_count += 1
-
-        due_label, due_class = _popup_due_chip_v2(item.due_date)
-        sender_name = self.context.address_book_service.resolve_display_name(item.sender_email, item.sender_email)
+    for mail in classified_mails:
+        final_category = int(mail.get("final_category") or 3)
+        summary = str(mail.get("summary") or mail.get("subject") or "메일")
+        subject = str(mail.get("subject") or "(제목 없음)")
+        sender = str(mail.get("sender") or "-")
+        received_at = str(mail.get("received_at") or "-")
+        due_date = str(mail.get("due_date") or "").strip()
+        action_text = _popup_action_text(mail.get("action_types"))
+        detail_bits = [f"분류 {_popup_category_label(final_category)}"]
+        if action_text:
+            detail_bits.append(f"액션 {action_text}")
+        if due_date:
+            detail_bits.append(f"기한 {due_date}")
+        if bool(mail.get("correction_applied")):
+            detail_bits.append("정책 보정")
+        chip_class = _popup_category_chip_class(final_category)
+        card_class = _popup_category_card_class(final_category)
         cards.append(
             (
-                "<div class='tray-popup-card'>"
+                f"<div class='tray-popup-card {card_class}'>"
                 "<div class='tray-popup-row'>"
                 "<div class='tray-popup-card-main'>"
-                f"<div class='tray-popup-name'>{escape(item.action_text or '할일')}</div>"
-                f"<div class='tray-popup-subject'>{escape(item.mail_subject or '(제목 없음)')}</div>"
-                f"<div class='tray-popup-meta'>보낸 사람 {escape(sender_name)}</div>"
-                f"<div class='tray-popup-meta'>수신 {_format_datetime(item.received_at)}</div>"
+                f"<div class='tray-popup-name'>{escape(summary)}</div>"
+                f"<div class='tray-popup-subject'>{escape(subject)}</div>"
+                f"<div class='tray-popup-meta'>보낸 사람 {escape(sender)} · 수신 {escape(received_at)}</div>"
+                f"<div class='tray-popup-meta'>{escape(' · '.join(detail_bits))}</div>"
                 "</div>"
-                f"<div class='tray-popup-chip {due_class}'>{escape(due_label)}</div>"
+                f"<div class='tray-popup-chip {chip_class}'>{escape(_popup_category_label(final_category))}</div>"
                 "</div>"
                 "</div>"
             )
@@ -1137,19 +1248,19 @@ def _desktop_api_build_todo_popup_html_v2(self: DesktopApi) -> str:
 
     summary = (
         "<div class='tray-popup-metrics'>"
-        f"{_metric_card('열린 할일', len(todos))}"
-        f"{_metric_card('오늘 마감', due_today_count)}"
-        f"{_metric_card('지연', overdue_count)}"
+        f"{_metric_card('내가해야할일', counts.get('category_1', 0))}"
+        f"{_metric_card('내가검토할일', counts.get('category_2', 0))}"
+        f"{_metric_card('단순 참고용', counts.get('category_3', 0))}"
         f"{_metric_card('마지막 갱신', now.strftime('%Y-%m-%d %H:%M'))}"
         "</div>"
     )
     body = (
-        f"{_popup_header('Tray', '내 할일', '메인 창을 열지 않아도 열린 할일과 마감 상태를 빠르게 확인할 수 있습니다.')}"
+        f"{_popup_header('Tray', '메일 분류', '현재 수신 메일을 내가해야할일, 내가검토할일, 단순 참고용으로 빠르게 확인할 수 있습니다.')}"
         f"{summary}"
         f"{_popup_refresh_bar_v2()}"
-        + ("".join(cards) if cards else "<div class='tray-popup-empty'>열린 할일이 없습니다.</div>")
+        + ("".join(cards) if cards else "<div class='tray-popup-empty'>표시할 메일이 없습니다.</div>")
     )
-    return self._wrap_popup_html("MailAI | 내 할일", body, TRAY_TODO_POPUP)
+    return self._wrap_popup_html("MailAI | 메일 분류", body, TRAY_TODO_POPUP)
 
 
 def _desktop_api_build_autosend_popup_html_v2(self: DesktopApi) -> str:
@@ -1595,9 +1706,9 @@ def _desktop_api_wrap_popup_html_v4(self: DesktopApi, title: str, body: str, pop
       background: linear-gradient(180deg, var(--popup-bg-top) 0%, var(--popup-bg-bottom) 100%);
       color: var(--popup-text);
       font-family: "Segoe UI Variable Text", "Segoe UI", "Malgun Gothic", "Noto Sans KR", sans-serif;
-      font-size: 12px;
-      line-height: 1.45;
-      padding: 10px;
+      font-size: 12.5px;
+      line-height: 1.52;
+      padding: 12px;
       -webkit-font-smoothing: subpixel-antialiased;
       text-rendering: auto;
       font-smooth: never;
@@ -1605,13 +1716,13 @@ def _desktop_api_wrap_popup_html_v4(self: DesktopApi, title: str, body: str, pop
     .tray-popup-shell {{
       display: flex;
       flex-direction: column;
-      gap: 8px;
-      min-height: calc(100vh - 20px);
+      gap: 10px;
+      min-height: calc(100vh - 24px);
     }}
     .tray-popup-header {{
       margin-bottom: 0;
-      padding: 12px 13px;
-      border-radius: 18px;
+      padding: 14px 15px;
+      border-radius: 20px;
       border: 1px solid var(--popup-line);
       background:
         radial-gradient(circle at top right, rgba(204, 125, 94, 0.14), rgba(204, 125, 94, 0) 34%),
@@ -1633,28 +1744,28 @@ def _desktop_api_wrap_popup_html_v4(self: DesktopApi, title: str, body: str, pop
     }}
     .tray-popup-title {{
       margin-top: 7px;
-      font-size: 18px;
+      font-size: 18.5px;
       font-weight: 800;
       line-height: 1.12;
       letter-spacing: -0.01em;
       color: var(--popup-text);
     }}
     .tray-popup-copy {{
-      margin-top: 4px;
+      margin-top: 5px;
       color: var(--popup-muted);
-      line-height: 1.48;
-      font-size: 11.5px;
+      line-height: 1.58;
+      font-size: 11.8px;
     }}
     .tray-popup-metrics {{
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 6px;
+      gap: 8px;
       margin-bottom: 0;
     }}
     .tray-popup-metric {{
       min-width: 0;
-      padding: 8px 9px;
-      border-radius: 13px;
+      padding: 9px 10px;
+      border-radius: 15px;
       border: 1px solid var(--popup-line);
       background: var(--popup-panel);
       box-shadow: var(--popup-shadow-xs);
@@ -1691,9 +1802,9 @@ def _desktop_api_wrap_popup_html_v4(self: DesktopApi, title: str, body: str, pop
       background: linear-gradient(180deg, #ffffff, #f9f1eb);
       color: var(--popup-primary);
       border-radius: 999px;
-      padding: 6px 10px;
+      padding: 7px 11px;
       font-weight: 800;
-      font-size: 11px;
+      font-size: 11.2px;
       line-height: 1.1;
       cursor: pointer;
       box-shadow: none;
@@ -1705,40 +1816,61 @@ def _desktop_api_wrap_popup_html_v4(self: DesktopApi, title: str, body: str, pop
       color: var(--popup-primary-dark);
     }}
     .tray-popup-card {{
-      padding: 9px 10px;
-      border-radius: 14px;
+      padding: 11px 12px;
+      border-radius: 16px;
       border: 1px solid var(--popup-line);
       background: var(--popup-panel-strong);
       box-shadow: var(--popup-shadow-xs);
-      margin-bottom: 6px;
+      margin-bottom: 8px;
+      position: relative;
+      overflow: hidden;
+    }}
+    .tray-popup-card::before {{
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 4px;
+      background: transparent;
+    }}
+    .tray-popup-card.is-category-1::before {{
+      background: var(--popup-primary);
+    }}
+    .tray-popup-card.is-category-2::before {{
+      background: #a5622b;
+    }}
+    .tray-popup-card.is-category-3::before {{
+      background: #6f7c86;
     }}
     .tray-popup-row {{
       display: flex;
       justify-content: space-between;
-      gap: 9px;
+      gap: 10px;
       align-items: flex-start;
     }}
     .tray-popup-card-main {{
       min-width: 0;
       flex: 1 1 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
     }}
     .tray-popup-name {{
-      font-size: 13px;
+      font-size: 13.5px;
       font-weight: 800;
-      line-height: 1.32;
+      line-height: 1.38;
       margin-bottom: 2px;
       color: var(--popup-text);
     }}
     .tray-popup-subject {{
       color: #3c2f24;
-      line-height: 1.42;
-      font-size: 12px;
+      line-height: 1.52;
+      font-size: 12.2px;
       margin-bottom: 4px;
     }}
     .tray-popup-meta {{
       color: #6f5f50;
-      font-size: 11px;
-      line-height: 1.34;
+      font-size: 11.2px;
+      line-height: 1.48;
     }}
     .tray-popup-chip {{
       display: inline-flex;
@@ -1771,23 +1903,24 @@ def _desktop_api_wrap_popup_html_v4(self: DesktopApi, title: str, body: str, pop
     }}
     .tray-popup-warning {{
       margin-bottom: 0;
-      padding: 9px 10px;
-      border-radius: 13px;
+      padding: 10px 11px;
+      border-radius: 14px;
       background: var(--popup-warn-bg);
       color: var(--popup-warn-text);
       border: 1px solid rgba(165, 98, 43, 0.16);
       font-weight: 700;
-      font-size: 11px;
-      line-height: 1.35;
+      font-size: 11.2px;
+      line-height: 1.45;
     }}
     .tray-popup-empty {{
-      padding: 12px 10px;
-      border-radius: 14px;
+      padding: 14px 12px;
+      border-radius: 16px;
       border: 1px dashed var(--popup-line-strong);
       color: var(--popup-muted);
       background: rgba(255, 252, 248, 0.84);
       text-align: center;
-      font-size: 11.5px;
+      font-size: 11.8px;
+      line-height: 1.55;
     }}
     @media (max-width: 560px) {{
       body {{ padding: 6px; }}
@@ -1838,3 +1971,131 @@ def _desktop_api_wrap_popup_html_v4(self: DesktopApi, title: str, body: str, pop
 
 
 DesktopApi._wrap_popup_html = _desktop_api_wrap_popup_html_v4
+
+
+def _desktop_api_build_todo_popup_html_v4(self: DesktopApi) -> str:
+    classified_mails, counts = _build_popup_classified_mail_payload(self.context)
+    now = datetime.now()
+    summary = (
+        "<div class='tray-popup-metrics'>"
+        f"{_metric_card('내가해야할일', counts.get('category_1', 0))}"
+        f"{_metric_card('내가검토할일', counts.get('category_2', 0))}"
+        f"{_metric_card('단순 참고용', counts.get('category_3', 0))}"
+        f"{_metric_card('마지막 갱신', now.strftime('%Y-%m-%d %H:%M'))}"
+        "</div>"
+    )
+    body = (
+        f"{_popup_header('Tray', '메일 분류', '현재 수신 메일을 내가해야할일, 내가검토할일, 단순 참고용으로 빠르게 확인할 수 있습니다.')}"
+        f"{summary}"
+        f"{_popup_refresh_bar_v2()}"
+        f"{_build_popup_tabbed_mail_sections(classified_mails, counts)}"
+    )
+    html = self._wrap_popup_html("MailAI | 메일 분류", body, TRAY_TODO_POPUP)
+    return _humanize_popup_datetime_tokens(html)
+
+
+def _desktop_api_wrap_popup_html_v5(self: DesktopApi, title: str, body: str, popup_kind: str) -> str:
+    html = _desktop_api_wrap_popup_html_v4(self, title, body, popup_kind)
+    tab_css = """
+    .tray-popup-tab-shell {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .tray-popup-tab-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .tray-popup-tab-button {
+      appearance: none;
+      border: 1px solid var(--popup-line);
+      background: rgba(255, 255, 255, 0.72);
+      color: var(--popup-muted);
+      border-radius: 999px;
+      padding: 7px 11px;
+      font-weight: 800;
+      font-size: 11px;
+      line-height: 1.1;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+    }
+    .tray-popup-tab-button:hover {
+      border-color: rgba(204, 125, 94, 0.24);
+      color: var(--popup-primary-dark);
+    }
+    .tray-popup-tab-button.is-active {
+      border-color: rgba(204, 125, 94, 0.28);
+      background: var(--popup-primary-soft);
+      color: var(--popup-primary-dark);
+    }
+    .tray-popup-tab-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 6px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.8);
+      color: inherit;
+      font-size: 10px;
+      line-height: 1;
+    }
+    .tray-popup-tab-panel {
+      display: none;
+    }
+    .tray-popup-tab-panel.is-active {
+      display: block;
+    }
+"""
+    tab_js = """
+    function initPopupTabs() {
+      const root = document.querySelector("[data-popup-tab-root]");
+      if (!root) {
+        return;
+      }
+
+      const buttons = Array.from(root.querySelectorAll("[data-popup-tab]"));
+      const panels = Array.from(root.querySelectorAll("[data-popup-tab-panel]"));
+      if (!buttons.length || !panels.length) {
+        return;
+      }
+
+      function setActiveTab(tabKey) {
+        buttons.forEach((button) => {
+          const isActive = button.getAttribute("data-popup-tab") === tabKey;
+          button.classList.toggle("is-active", isActive);
+          button.setAttribute("aria-selected", isActive ? "true" : "false");
+        });
+        panels.forEach((panel) => {
+          const isActive = panel.getAttribute("data-popup-tab-panel") === tabKey;
+          panel.classList.toggle("is-active", isActive);
+          panel.setAttribute("aria-hidden", isActive ? "false" : "true");
+        });
+      }
+
+      buttons.forEach((button) => {
+        button.addEventListener("click", () => {
+          setActiveTab(button.getAttribute("data-popup-tab") || "");
+        });
+      });
+
+      const initialButton = buttons.find((button) => button.classList.contains("is-active")) || buttons[0];
+      if (initialButton) {
+        setActiveTab(initialButton.getAttribute("data-popup-tab") || "");
+      }
+    }
+
+    initPopupTabs();
+"""
+    html = html.replace("  </style>", f"{tab_css}\n  </style>", 1)
+    html = html.replace("  </script>", f"{tab_js}\n  </script>", 1)
+    return html
+
+
+DesktopApi._build_todo_popup_html = _desktop_api_build_todo_popup_html_v4
+DesktopApi._wrap_popup_html = _desktop_api_wrap_popup_html_v5

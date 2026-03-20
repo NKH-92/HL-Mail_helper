@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import sys
 import time
@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.core.security import GEMINI_API_KEY, HANLIM_API_KEY, MAIL_PASSWORD_KEY
-from app.db.models import ThreadOverview
+from app.db.models import MailRecord
 from app.ui.desktop_bridge import DesktopApi, TRAY_AUTO_SEND_POPUP, TRAY_TODO_POPUP
 from app.ui.page_config import AUTO_SEND_PAGE, DASHBOARD_PAGE, HELP_PAGE, SETTINGS_PAGE
 
@@ -71,32 +71,19 @@ class DesktopBridgeTests(unittest.TestCase):
             return False
 
     class _FakeMailRepository:
-        def __init__(self, todos: list[object], *, thread_overviews: list[ThreadOverview] | None = None) -> None:
+        def __init__(self, todos: list[object], *, classified_mails: list[MailRecord] | None = None) -> None:
             self._todos = todos
-            self._thread_overviews = thread_overviews or []
+            self._classified_mails = classified_mails or []
 
         def list_open_my_action_items(self) -> list[object]:
             return list(self._todos)
 
         def list_completed_my_action_items(self, limit: int = 20) -> list[object]:
+            del limit
             return []
 
-        def list_thread_overviews(self, user_email: str = "", limit: int | None = None) -> list[ThreadOverview]:
-            del user_email
-            rows = list(self._thread_overviews)
-            return rows[:limit] if limit else rows
-
-        def list_thread_mails_by_keys(
-            self,
-            thread_keys: list[str],
-            *,
-            limit_per_thread: int = 10,
-        ) -> dict[str, list[object]]:
-            del limit_per_thread
-            return {thread_key: [] for thread_key in thread_keys}
-
-        def list_thread_action_items_by_keys(self, thread_keys: list[str]) -> dict[str, list[object]]:
-            return {thread_key: [] for thread_key in thread_keys}
+        def list_classified_mails(self, limit: int = 200) -> list[MailRecord]:
+            return list(self._classified_mails[:limit])
 
         @staticmethod
         def count_analysis_backlog() -> dict[str, int]:
@@ -181,39 +168,65 @@ class DesktopBridgeTests(unittest.TestCase):
             return []
 
     @staticmethod
-    def _make_thread(thread_key: str, *, follow_up_status: str = "tracked") -> ThreadOverview:
-        return ThreadOverview(
-            thread_key=thread_key,
-            latest_mail_id=1,
-            thread_subject=f"Thread {thread_key}",
-            latest_received_at="2026-03-11 10:00:00",
-            latest_sender_name="Sender",
-            latest_sender_email="sender@example.com",
-            latest_summary="Summary",
-            overall_summary="Overall summary",
-            changed_since_last="Changed since last",
-            current_conclusion="Current conclusion",
-            follow_up_status=follow_up_status,
-            follow_up_label=follow_up_status,
-            follow_up_detail="Follow up detail",
-            due_date=None,
+    def _make_mail(mail_id: int, *, final_category: int, subject: str, summary: str) -> MailRecord:
+        category_map = {1: "direct_action", 2: "review_needed", 3: "reference_only"}
+        return MailRecord(
+            id=mail_id,
+            message_id=f"msg-{mail_id}",
+            subject=subject,
+            normalized_subject=subject,
+            thread_key=f"thread-{mail_id}",
+            in_reply_to=None,
+            references=[],
+            sender_name="Sender",
+            sender_email="sender@example.com",
+            to_list=["tester@example.com"] if final_category == 1 else [],
+            cc_list=["tester@example.com"] if final_category == 2 else [],
+            received_at="2026-03-11 10:00:00",
+            body_text=f"{subject} full body",
+            raw_preview=f"{subject} preview",
+            attachment_names=[],
+            attachment_paths=[],
+            category="ACT" if final_category in {1, 2} else "FYI",
             priority="medium",
-            category="ACT",
-            latest_mail_status="todo",
-            latest_action_status="direct_action",
-            mail_count=1,
-            participant_count=1,
-            participants=["Sender"],
-            open_action_count=1,
-            importance_score=10,
-            urgency_score=5,
-            reply_score=3,
-            approval_score=0,
-            today_score=0,
-            priority_score=18,
-            priority_reasons=["Recent thread"],
-            needs_review=False,
-            has_failed_analysis=False,
+            summary_short=summary,
+            summary_long=[summary],
+            due_date="2026-03-19 18:00:00" if final_category == 1 else None,
+            my_action_required=final_category in {1, 2},
+            my_action_status=category_map[final_category],
+            ownership_reason=["test"],
+            confidence=0.91,
+            status="todo",
+            analysis_status="success",
+            analysis_error=None,
+            created_at="2026-03-11 10:00:00",
+            updated_at="2026-03-11 10:01:00",
+            action_classification="ACTION_SELF" if final_category == 1 else "ACTION_SHARED",
+            action_owner="me" if final_category == 1 else "other",
+            action_types=["reply"] if final_category == 1 else ["review"] if final_category == 2 else ["none"],
+            deadline_raw="2026-03-19 18:00:00" if final_category == 1 else None,
+            evidence=["근거 문장"],
+            analysis_reason="reason",
+            suggested_task_title=summary if final_category == 1 else None,
+            is_to_me=final_category == 1,
+            is_cc_me=final_category == 2,
+            recipient_role="TO" if final_category == 1 else "CC" if final_category == 2 else "NONE",
+            is_system_sender=False,
+            is_newsletter_like=False,
+            sender_type="internal",
+            rule_category=final_category,
+            request_present=final_category in {1, 2},
+            request_target="me" if final_category == 1 else "other" if final_category == 2 else "unknown",
+            request_target_is_me=final_category == 1,
+            urgency="high" if final_category == 1 else "medium",
+            llm_category=final_category,
+            final_category=final_category,
+            correction_applied=False,
+            correction_reason=None,
+            conflict_type=None,
+            model_name="gemini-2.5-flash",
+            analyzed_at="2026-03-11 10:01:00",
+            raw_llm_json="{}",
         )
 
     def _build_context(
@@ -221,10 +234,10 @@ class DesktopBridgeTests(unittest.TestCase):
         *,
         todos: list[object] | None = None,
         templates: list[object] | None = None,
-        thread_overviews: list[ThreadOverview] | None = None,
+        classified_mails: list[MailRecord] | None = None,
     ) -> object:
         return SimpleNamespace(
-            mail_repository=self._FakeMailRepository(todos or [], thread_overviews=thread_overviews),
+            mail_repository=self._FakeMailRepository(todos or [], classified_mails=classified_mails),
             template_service=self._FakeTemplateService(templates or []),
             send_service=self._FakeSendService(),
             scheduler_manager=self._FakeSchedulerManager(),
@@ -239,7 +252,7 @@ class DesktopBridgeTests(unittest.TestCase):
         has_password: bool = False,
         has_api_key: bool = False,
         has_hanlim_api_key: bool = False,
-        thread_overviews: list[ThreadOverview] | None = None,
+        classified_mails: list[MailRecord] | None = None,
     ) -> object:
         config = self._FakeConfig(ready=ready)
         return SimpleNamespace(
@@ -250,8 +263,9 @@ class DesktopBridgeTests(unittest.TestCase):
                 has_api_key=has_api_key,
                 has_hanlim_api_key=has_hanlim_api_key,
             ),
-            mail_repository=self._FakeMailRepository([], thread_overviews=thread_overviews),
+            mail_repository=self._FakeMailRepository([], classified_mails=classified_mails),
             template_service=self._FakeTemplateService([]),
+            mail_template_service=SimpleNamespace(list_templates=lambda: []),
             send_service=self._FakeSendService(),
             scheduler_manager=self._FakeSchedulerManager(),
             sync_service=SimpleNamespace(
@@ -266,31 +280,67 @@ class DesktopBridgeTests(unittest.TestCase):
                 }
             ),
             mailbox_service=SimpleNamespace(get_analysis_warning=lambda: ""),
+            send_log_repository=SimpleNamespace(list_recent=lambda: []),
             logger=self._FakeLogger(),
         )
 
     def test_todo_popup_html_is_localized_and_compact(self) -> None:
-        todo = SimpleNamespace(
-            action_text="계약 검토",
-            mail_subject="견적 확인",
-            sender_email="vendor@example.com",
-            received_at="2026-03-11 09:10:00",
-            due_date=None,
-        )
-
-        html = DesktopApi(self._build_context(todos=[todo])).get_popup_html(TRAY_TODO_POPUP)
+        html = DesktopApi(
+            self._build_context(
+                classified_mails=[
+                    self._make_mail(1, final_category=1, subject="견적 확인", summary="금일 회신 필요"),
+                ]
+            )
+        ).get_popup_html(TRAY_TODO_POPUP)
 
         self.assertIn('lang="ko"', html)
-        self.assertIn("MailAI | 내 할일", html)
-        self.assertIn("내 할일", html)
+        self.assertIn("MailAI | 메일 분류", html)
+        self.assertIn("메일 분류", html)
+        self.assertIn("내가해야할일", html)
         self.assertIn("보낸 사람", html)
-        self.assertIn("기한 없음", html)
+        self.assertIn("액션 회신", html)
         self.assertIn("새로고침", html)
-        self.assertIn("font-size: 13px;", html)
+        self.assertIn("font-size: 13.5px;", html)
         self.assertIn("#fdfcfb", html)
         self.assertIn('font-family: "Segoe UI Variable Text"', html)
         self.assertIn("grid-template-columns: repeat(4, minmax(0, 1fr));", html)
+        self.assertIn("data-popup-tab-root", html)
+        self.assertIn("data-popup-tab='category_1'", html)
+        self.assertIn("data-popup-tab='category_2'", html)
+        self.assertIn("data-popup-tab='category_3'", html)
+        self.assertIn("function initPopupTabs()", html)
         self.assertNotIn("Open Tasks", html)
+
+    def test_todo_popup_html_separates_cards_by_category_tabs(self) -> None:
+        html = DesktopApi(
+            self._build_context(
+                classified_mails=[
+                    self._make_mail(1, final_category=1, subject="Action mail", summary="Action summary"),
+                    self._make_mail(2, final_category=2, subject="Review mail", summary="Review summary"),
+                    self._make_mail(3, final_category=3, subject="Reference mail", summary="Reference summary"),
+                ]
+            )
+        ).get_popup_html(TRAY_TODO_POPUP)
+
+        category_1_panel = html.split("data-popup-tab-panel='category_1'", 1)[1].split(
+            "data-popup-tab-panel='category_2'",
+            1,
+        )[0]
+        category_2_panel = html.split("data-popup-tab-panel='category_2'", 1)[1].split(
+            "data-popup-tab-panel='category_3'",
+            1,
+        )[0]
+        category_3_panel = html.split("data-popup-tab-panel='category_3'", 1)[1]
+
+        self.assertIn("Action summary", category_1_panel)
+        self.assertNotIn("Review summary", category_1_panel)
+        self.assertNotIn("Reference summary", category_1_panel)
+        self.assertIn("Review summary", category_2_panel)
+        self.assertNotIn("Action summary", category_2_panel)
+        self.assertNotIn("Reference summary", category_2_panel)
+        self.assertIn("Reference summary", category_3_panel)
+        self.assertNotIn("Action summary", category_3_panel)
+        self.assertNotIn("Review summary", category_3_panel)
 
     def test_not_ready_page_state_allows_help_but_redirects_dashboard(self) -> None:
         api = DesktopApi(self._build_page_state_context(ready=False, has_password=False))
@@ -303,9 +353,13 @@ class DesktopBridgeTests(unittest.TestCase):
         self.assertEqual(dashboard_state["page"], SETTINGS_PAGE)
         self.assertEqual(dashboard_state["page_id"], "settings")
 
-    def test_dashboard_page_state_uses_thread_filter_pagination(self) -> None:
-        threads = [self._make_thread(f"reply-{index:02d}", follow_up_status="reply_needed") for index in range(1, 13)]
-        context = self._build_page_state_context(ready=True, has_password=True, thread_overviews=threads)
+    def test_dashboard_page_state_uses_classified_mail_tabs_and_selection(self) -> None:
+        mails = [
+            self._make_mail(1, final_category=1, subject="Action mail", summary="회신 필요"),
+            self._make_mail(2, final_category=2, subject="Review mail", summary="검토 필요"),
+            self._make_mail(3, final_category=3, subject="FYI mail", summary="참고용"),
+        ]
+        context = self._build_page_state_context(ready=True, has_password=True, classified_mails=mails)
         api = DesktopApi(context)
 
         state = api.dispatch(
@@ -314,26 +368,32 @@ class DesktopBridgeTests(unittest.TestCase):
                 "action": "refresh_dashboard",
                 "client_state": {
                     "page": DASHBOARD_PAGE,
-                    "dashboard_thread_filter": "reply",
-                    "dashboard_thread_page": 2,
+                    "dashboard_mail_tab": "category_2",
+                    "dashboard_mail_view": "detail",
+                    "selected_mail_id": 2,
                 },
+                "client_state_version": 1,
             }
         )
 
         self.assertEqual(state["page"], DASHBOARD_PAGE)
-        self.assertEqual(state["dashboard_thread_filter"], "reply")
-        self.assertEqual(state["dashboard_thread_pagination"]["page"], 2)
-        self.assertEqual(state["dashboard_thread_pagination"]["total_items"], 12)
-        self.assertEqual(state["dashboard_thread_pagination"]["start_item"], 11)
-        self.assertEqual(state["dashboard_thread_pagination"]["end_item"], 12)
-        self.assertEqual(len(state["priority_threads"]), 2)
-        self.assertEqual(state["priority_threads"][0]["thread_key"], "reply-11")
-        self.assertEqual(state["selected_thread_key"], "reply-11")
+        self.assertEqual(state["dashboard_mail_tab"], "category_2")
+        self.assertEqual(state["dashboard_mail_view"], "detail")
+        self.assertEqual(state["selected_mail_id"], 2)
+        self.assertEqual(state["dashboard_mail_category_counts"]["category_1"], 1)
+        self.assertEqual(state["dashboard_mail_category_counts"]["category_2"], 1)
+        self.assertEqual(state["dashboard_mail_category_counts"]["category_3"], 1)
+        self.assertEqual(len(state["classified_mails"]), 3)
+        self.assertEqual(state["classified_mails"][1]["final_category"], 2)
+        self.assertEqual(state["classified_mails"][1]["body_text"], "Review mail full body")
         self.assertEqual(state["sync_status"]["interval_minutes"], 60)
 
     def test_stale_client_state_version_does_not_override_newer_dashboard_state(self) -> None:
-        threads = [self._make_thread(f"thread-{index:02d}") for index in range(1, 13)]
-        context = self._build_page_state_context(ready=True, has_password=True, thread_overviews=threads)
+        mails = [
+            self._make_mail(1, final_category=1, subject="Action mail", summary="회신 필요"),
+            self._make_mail(2, final_category=2, subject="Review mail", summary="검토 필요"),
+        ]
+        context = self._build_page_state_context(ready=True, has_password=True, classified_mails=mails)
         api = DesktopApi(context)
 
         api.dispatch(
@@ -342,8 +402,9 @@ class DesktopBridgeTests(unittest.TestCase):
                 "action": "refresh_dashboard",
                 "client_state": {
                     "page": DASHBOARD_PAGE,
-                    "dashboard_thread_filter": "reply",
-                    "dashboard_thread_page": 2,
+                    "dashboard_mail_tab": "category_2",
+                    "dashboard_mail_view": "detail",
+                    "selected_mail_id": 2,
                 },
                 "client_state_version": 1,
             }
@@ -354,8 +415,9 @@ class DesktopBridgeTests(unittest.TestCase):
                 "action": "refresh_dashboard",
                 "client_state": {
                     "page": DASHBOARD_PAGE,
-                    "dashboard_thread_filter": "all",
-                    "dashboard_thread_page": 1,
+                    "dashboard_mail_tab": "category_1",
+                    "dashboard_mail_view": "list",
+                    "selected_mail_id": 1,
                 },
                 "client_state_version": 2,
             }
@@ -366,17 +428,20 @@ class DesktopBridgeTests(unittest.TestCase):
                 "action": "refresh_dashboard",
                 "client_state": {
                     "page": DASHBOARD_PAGE,
-                    "dashboard_thread_filter": "reply",
-                    "dashboard_thread_page": 2,
+                    "dashboard_mail_tab": "category_2",
+                    "dashboard_mail_view": "detail",
+                    "selected_mail_id": 2,
                 },
                 "client_state_version": 1,
             }
         )
 
-        self.assertEqual(latest_state["dashboard_thread_filter"], "all")
-        self.assertEqual(latest_state["dashboard_thread_pagination"]["page"], 1)
-        self.assertEqual(stale_state["dashboard_thread_filter"], "all")
-        self.assertEqual(stale_state["dashboard_thread_pagination"]["page"], 1)
+        self.assertEqual(latest_state["dashboard_mail_tab"], "category_1")
+        self.assertEqual(latest_state["dashboard_mail_view"], "list")
+        self.assertEqual(latest_state["selected_mail_id"], 1)
+        self.assertEqual(stale_state["dashboard_mail_tab"], "category_1")
+        self.assertEqual(stale_state["dashboard_mail_view"], "list")
+        self.assertEqual(stale_state["selected_mail_id"], 1)
         self.assertEqual(stale_state["client_state_version"], 2)
 
     def test_sync_mail_dispatch_runs_in_background_and_updates_sync_progress(self) -> None:
@@ -423,7 +488,7 @@ class DesktopBridgeTests(unittest.TestCase):
         context = self._build_page_state_context(
             ready=True,
             has_password=True,
-            thread_overviews=[self._make_thread("thread-01")],
+            classified_mails=[self._make_mail(1, final_category=1, subject="Action mail", summary="회신 필요")],
         )
         context.scheduler_manager = _BlockingSchedulerManager()
         api = DesktopApi(context)
@@ -432,9 +497,7 @@ class DesktopBridgeTests(unittest.TestCase):
             {
                 "page": DASHBOARD_PAGE,
                 "action": "sync_mail",
-                "client_state": {
-                    "page": DASHBOARD_PAGE,
-                },
+                "client_state": {"page": DASHBOARD_PAGE},
             }
         )
 
@@ -443,15 +506,13 @@ class DesktopBridgeTests(unittest.TestCase):
             {
                 "page": DASHBOARD_PAGE,
                 "action": "refresh_dashboard",
-                "client_state": {
-                    "page": DASHBOARD_PAGE,
-                },
+                "client_state": {"page": DASHBOARD_PAGE},
             }
         )
 
         self.assertEqual(scheduler_calls, [(True, "manual")])
-        self.assertEqual(initial_state["sync_progress"]["running"], True)
-        self.assertEqual(running_state["sync_progress"]["running"], True)
+        self.assertTrue(initial_state["sync_progress"]["running"])
+        self.assertTrue(running_state["sync_progress"]["running"])
         self.assertEqual(running_state["sync_progress"]["stage"], "analyzing")
         self.assertEqual(running_state["sync_progress"]["saved_count"], 3)
         self.assertEqual(running_state["sync_progress"]["analysis_completed"], 1)
@@ -466,9 +527,7 @@ class DesktopBridgeTests(unittest.TestCase):
             {
                 "page": DASHBOARD_PAGE,
                 "action": "refresh_dashboard",
-                "client_state": {
-                    "page": DASHBOARD_PAGE,
-                },
+                "client_state": {"page": DASHBOARD_PAGE},
             }
         )
 
@@ -485,8 +544,6 @@ class DesktopBridgeTests(unittest.TestCase):
 
         context = self._build_page_state_context(ready=True, has_password=True)
         context.address_book_service = _AddressBookWithContacts()
-        context.mail_template_service = context.template_service
-        context.send_log_repository = SimpleNamespace(list_recent=lambda: [])
         api = DesktopApi(context)
 
         dashboard_state = api._build_page_state(DASHBOARD_PAGE)
@@ -503,7 +560,6 @@ class DesktopBridgeTests(unittest.TestCase):
             has_api_key=False,
             has_hanlim_api_key=True,
         )
-        context.send_log_repository = SimpleNamespace(list_recent=lambda: [])
         api = DesktopApi(context)
 
         settings_state = api._build_page_state(SETTINGS_PAGE)
@@ -559,4 +615,3 @@ class DesktopBridgeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

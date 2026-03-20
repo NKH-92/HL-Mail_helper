@@ -114,6 +114,16 @@ class PromptAndUiHelperTests(unittest.TestCase):
 
             self.assertEqual(manager._read("classify_prompt.txt"), "fallback prompt")
 
+    def test_prompt_manager_uses_builtin_defaults_when_files_are_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as primary_dir:
+            manager = PromptManager(Path(primary_dir))
+
+            prompt = manager.build_system_prompt()
+
+            self.assertIn("enterprise-grade email action classification engine", prompt)
+            self.assertIn("Use only these enum values:", prompt)
+            self.assertIn("Determine whether the request is directed to:", prompt)
+
     def test_prompt_manager_rebuilds_cached_system_prompt_when_source_changes(self) -> None:
         with tempfile.TemporaryDirectory() as prompt_dir:
             prompt_path = Path(prompt_dir)
@@ -136,6 +146,171 @@ class PromptAndUiHelperTests(unittest.TestCase):
 
             self.assertIn("ownership v2", rebuilt_prompt)
             self.assertNotEqual(initial_prompt, rebuilt_prompt)
+
+    def test_prompt_manager_builds_sectioned_user_prompt(self) -> None:
+        manager = PromptManager(Path(tempfile.gettempdir()))
+        mail = MailRecord(
+            id=1,
+            message_id="msg-1",
+            subject="Review request",
+            normalized_subject="Review request",
+            thread_key="thread-1",
+            in_reply_to=None,
+            references=[],
+            sender_name="Sender",
+            sender_email="sender@example.com",
+            to_list=["user@example.com"],
+            cc_list=["team@example.com"],
+            received_at="2026-03-19 09:00:00",
+            body_text="Please review the attached file and reply today.",
+            raw_preview="Please review the attached file and reply today.",
+            attachment_names=["report.xlsx"],
+            attachment_paths=[],
+            category="ACT",
+            priority="high",
+            summary_short=None,
+            summary_long=[],
+            due_date=None,
+            my_action_required=True,
+            my_action_status="direct_action",
+            ownership_reason=[],
+            confidence=None,
+            status="todo",
+            analysis_status="pending",
+            analysis_error=None,
+            created_at="2026-03-19 09:00:00",
+            updated_at="2026-03-19 09:00:00",
+        )
+
+        prompt = manager.build_user_prompt(
+            mail,
+            thread_summary="- 2026-03-18 | sender@example.com | Prior note | Please proceed.",
+            current_user={
+                "email": "user@example.com",
+                "display_name": "남광현",
+                "job_title": "선임",
+            },
+            rule_context={
+                "is_to_me": True,
+                "is_cc_me": False,
+                "recipient_role": "TO",
+                "sender_type": "internal",
+            },
+        )
+
+        self.assertIn("[target_user]", prompt)
+        self.assertIn("[routing_facts]", prompt)
+        self.assertIn("[sender]", prompt)
+        self.assertIn("[email]", prompt)
+        self.assertIn("[attachments]", prompt)
+        self.assertIn("[thread_context]", prompt)
+        self.assertIn("- name: 남광현", prompt)
+        self.assertIn("- sender_type: internal", prompt)
+        self.assertIn("- report.xlsx", prompt)
+        self.assertIn("Return JSON only.", prompt)
+
+    def test_prompt_manager_builds_validation_prompt_with_candidate_json(self) -> None:
+        manager = PromptManager(Path(tempfile.gettempdir()))
+        mail = MailRecord(
+            id=2,
+            message_id="msg-2",
+            subject="FYI",
+            normalized_subject="FYI",
+            thread_key="thread-2",
+            in_reply_to=None,
+            references=[],
+            sender_name="Sender",
+            sender_email="sender@example.com",
+            to_list=["user@example.com"],
+            cc_list=[],
+            received_at="2026-03-19 10:00:00",
+            body_text="Sharing the latest status only.",
+            raw_preview="Sharing the latest status only.",
+            attachment_names=[],
+            attachment_paths=[],
+            category="FYI",
+            priority="none",
+            summary_short=None,
+            summary_long=[],
+            due_date=None,
+            my_action_required=False,
+            my_action_status="reference_only",
+            ownership_reason=[],
+            confidence=None,
+            status="todo",
+            analysis_status="pending",
+            analysis_error=None,
+            created_at="2026-03-19 10:00:00",
+            updated_at="2026-03-19 10:00:00",
+        )
+
+        prompt = manager.build_validation_user_prompt(
+            mail=mail,
+            thread_summary="",
+            current_user={
+                "email": "user@example.com",
+                "display_name": "Dana Lee",
+                "job_title": "Lead",
+            },
+            rule_context={"is_to_me": True, "is_cc_me": False, "recipient_role": "TO"},
+            candidate_result={"request_present": False, "final_category": 3},
+        )
+
+        self.assertIn("Validate the candidate classification result.", prompt)
+        self.assertIn("[target_user]", prompt)
+        self.assertIn("[sender]", prompt)
+        self.assertIn("[attachments]", prompt)
+        self.assertIn("[candidate_result]", prompt)
+        self.assertIn('"final_category": 3', prompt)
+
+    def test_prompt_manager_truncates_long_body_with_head_and_tail(self) -> None:
+        manager = PromptManager(Path(tempfile.gettempdir()))
+        head = "HEAD " * 80
+        tail = "TAIL " * 80
+        long_body = f"{head}{'middle ' * 400}{tail}"
+        mail = MailRecord(
+            id=3,
+            message_id="msg-3",
+            subject="Long body",
+            normalized_subject="Long body",
+            thread_key="thread-3",
+            in_reply_to=None,
+            references=[],
+            sender_name="Sender",
+            sender_email="sender@example.com",
+            to_list=["user@example.com"],
+            cc_list=[],
+            received_at="2026-03-19 11:00:00",
+            body_text=long_body,
+            raw_preview=long_body,
+            attachment_names=[],
+            attachment_paths=[],
+            category="ACT",
+            priority="medium",
+            summary_short=None,
+            summary_long=[],
+            due_date=None,
+            my_action_required=True,
+            my_action_status="direct_action",
+            ownership_reason=[],
+            confidence=None,
+            status="todo",
+            analysis_status="pending",
+            analysis_error=None,
+            created_at="2026-03-19 11:00:00",
+            updated_at="2026-03-19 11:00:00",
+        )
+
+        prompt = manager.build_user_prompt(
+            mail,
+            body_char_limit=400,
+            current_user={"email": "user@example.com"},
+            rule_context={},
+        )
+
+        self.assertIn("[... truncated ...]", prompt)
+        self.assertIn("HEAD HEAD", prompt)
+        self.assertIn("TAIL TAIL", prompt)
 
     def test_component_action_id_is_consumed_once(self) -> None:
         state: dict[str, object] = {}
@@ -287,6 +462,7 @@ class PromptAndUiHelperTests(unittest.TestCase):
             to_list=["user@example.com"],
             cc_list=[],
             received_at="2026-03-11 10:00:00",
+            body_text="Please send the revised quote before 5 PM.",
             raw_preview="Please send the revised quote before 5 PM.",
             attachment_names=["quote.xlsx"],
             attachment_paths=["templates/quote.xlsx"],
@@ -500,6 +676,7 @@ class PromptAndUiHelperTests(unittest.TestCase):
             to_list=["user@example.com"],
             cc_list=["finance@example.com"],
             received_at="2026-03-12 11:20:00",
+            body_text="Can you send the revised version today?",
             raw_preview="Can you send the revised version today?",
             attachment_names=[],
             attachment_paths=[],
@@ -609,7 +786,7 @@ class PromptAndUiHelperTests(unittest.TestCase):
         self.assertIn("title=\"사이드바 접기 또는 펼치기\"", html)
         self.assertIn("사용자 계정", html)
         self.assertIn("불러오는 중...", html)
-        self.assertIn("메일 브리프", html)
+        self.assertIn("메일 분류", html)
         self.assertIn("환경 설정", html)
         self.assertIn("템플릿 자동발송", html)
         self.assertIn("본문", html)
@@ -624,14 +801,12 @@ class PromptAndUiHelperTests(unittest.TestCase):
 
         self.assertIn("dashboard-split grid grid-cols-1 gap-4 md:gap-6 flex-1 min-h-0 overflow-hidden", html)
         self.assertIn("@media (min-width: 64rem)", html)
-        self.assertIn("grid-template-columns: minmax(0, 2fr) minmax(20rem, 0.92fr);", html)
-        self.assertIn("min-width: 20rem;", html)
+        self.assertIn("grid-template-columns: minmax(0, 1fr);", html)
         self.assertIn("grid grid-cols-1 xl:grid-cols-2 gap-4 md:gap-5", html)
         self.assertIn("flex flex-col sm:flex-row gap-2", html)
         self.assertIn("flex flex-col 2xl:flex-row gap-4 md:gap-6 flex-1 min-h-0 overflow-hidden", html)
 
-
-    def test_custom_board_dashboard_contains_priority_queue_shell(self) -> None:
+    def test_custom_board_dashboard_contains_mail_classification_shell(self) -> None:
         html = (Path(__file__).resolve().parents[1] / "app" / "ui" / "custom_board" / "index.html").read_text(
             encoding="utf-8"
         )
@@ -640,14 +815,15 @@ class PromptAndUiHelperTests(unittest.TestCase):
         )
 
         self.assertIn("dashboard-thread-panel", html)
-        self.assertIn("dashboard-task-panel", html)
         self.assertIn('id="priority-thread-list"', html)
         self.assertIn('id="priority-filter-container"', html)
         self.assertIn('id="priority-filter-shell"', html)
-        self.assertIn('id="priority-thread-list-view"', html)
-        self.assertNotIn('id="priority-thread-detail-view"', html)
-        self.assertNotIn('id="thread-detail-panel"', html)
-        self.assertNotIn('onclick="window.showPriorityList()"', html)
+        self.assertIn('id="priority-thread-detail-view"', html)
+        self.assertIn('id="dashboard-mail-summary-container"', html)
+        self.assertIn("메일 분류 목록", html)
+        self.assertNotIn("메일 원문", html)
+        self.assertNotIn('id="mail-detail-container"', html)
+        self.assertIn("뒤로가기", js)
         self.assertIn("HL-KMail Bot", html)
         self.assertIn('class="toolbar-actions"', html)
         self.assertIn('id="theme-light-btn"', html)
@@ -657,9 +833,16 @@ class PromptAndUiHelperTests(unittest.TestCase):
         self.assertIn('onclick="pickAttachmentFiles()"', html)
         self.assertIn('id="tpl_attachment_list"', html)
         self.assertNotIn("content-shell py-0", html)
-        self.assertIn('key: "today"', js)
-        self.assertIn('"Overdue deadline":', js)
-        self.assertIn('"No threads match this view.":', js)
+        self.assertIn('dashboardMailTab: "category_1"', js)
+        self.assertIn('dashboardMailView: "list"', js)
+        self.assertIn('dashboard_mail_tab', js)
+        self.assertIn('dashboard_mail_view', js)
+        self.assertIn('selected_mail_id', js)
+        self.assertIn("function renderDashboardMailSummary()", js)
+        self.assertIn("function showDashboardMailList()", js)
+        self.assertIn("window.setDashboardMailTab = setDashboardMailTab;", js)
+        self.assertIn("window.selectDashboardMail = selectDashboardMail;", js)
+        self.assertIn("window.showDashboardMailList = showDashboardMailList;", js)
         self.assertIn('sidebarMode: "auto"', js)
         self.assertIn("const SIDEBAR_AUTO_COLLAPSE_BREAKPOINT = 1200;", js)
         self.assertIn("function syncResponsiveSidebar()", js)
@@ -671,9 +854,8 @@ class PromptAndUiHelperTests(unittest.TestCase):
         self.assertIn("function wireAttachmentDropzone()", js)
         self.assertIn("function clearAttachmentFiles()", js)
         self.assertIn('window.addEventListener("resize", syncResponsiveSidebar);', js)
-        self.assertNotIn("function renderDashboardThreadDetail()", js)
-        self.assertNotIn("window.showPriorityList = showPriorityList;", js)
-        self.assertNotIn("window.selectPriorityThread = selectPriorityThread;", js)
+        self.assertNotIn("window.setDashboardThreadFilter = setDashboardThreadFilter;", js)
+        self.assertNotIn("window.setDashboardThreadPage = setDashboardThreadPage;", js)
 
     def test_custom_board_uses_clickable_datetime_inputs_for_autosend(self) -> None:
         html = (Path(__file__).resolve().parents[1] / "app" / "ui" / "custom_board" / "index.html").read_text(

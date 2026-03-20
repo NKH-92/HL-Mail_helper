@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -51,17 +52,53 @@ class AppContext:
     scheduler_manager: SchedulerManager
 
 
+def _runtime_root(data_root: Path) -> Path:
+    return data_root / "cache"
+
+
+def _move_legacy_runtime_dir(data_root: Path, runtime_root: Path, name: str) -> None:
+    legacy_dir = data_root / name
+    target_dir = runtime_root / name
+    if not legacy_dir.exists() or target_dir.exists():
+        return
+    target_dir.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.move(str(legacy_dir), str(target_dir))
+    except OSError:
+        return
+
+
+def _bootstrap_bundled_file(bundle_root: Path, relative_path: Path, target_path: Path) -> None:
+    if target_path.exists():
+        return
+    source_path = bundle_root / relative_path
+    if not source_path.exists() or not source_path.is_file():
+        return
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source_path, target_path)
+
+
 def build_app_context(data_root: Path, code_root: Path) -> AppContext:
     """Create the runtime service graph for the app."""
 
-    for name in ["config", "data", "logs", "cache", "templates", "prompts", "addressbook"]:
-        (data_root / name).mkdir(parents=True, exist_ok=True)
+    runtime_root = _runtime_root(data_root)
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    for legacy_name in ["config", "data", "logs", "templates", "prompts", "addressbook"]:
+        _move_legacy_runtime_dir(data_root, runtime_root, legacy_name)
+    for name in ["config", "data", "logs", "templates", "addressbook"]:
+        (runtime_root / name).mkdir(parents=True, exist_ok=True)
 
-    config_manager = ConfigManager(data_root / "config" / "settings.json")
-    address_book_service = AddressBookService(data_root=data_root, bundle_root=code_root)
+    _bootstrap_bundled_file(code_root, Path("config") / "settings.json", runtime_root / "config" / "settings.json")
+
+    config_manager = ConfigManager(runtime_root / "config" / "settings.json")
+    address_book_service = AddressBookService(
+        data_root=data_root,
+        bundle_root=code_root,
+        addressbook_subdir=Path("cache") / "addressbook",
+    )
     secret_store = SecretStore()
-    logger = configure_logger(data_root / "logs")
-    database = DatabaseManager(data_root / "data" / "app.db")
+    logger = configure_logger(runtime_root / "logs")
+    database = DatabaseManager(runtime_root / "data" / "app.db")
 
     mail_repository = MailRepository(database)
     mail_template_repository = MailTemplateRepository(database)
@@ -72,7 +109,7 @@ def build_app_context(data_root: Path, code_root: Path) -> AppContext:
     imap_client = IMAPClient(secret_store=secret_store, logger=logger)
     smtp_client = SMTPClient(secret_store=secret_store, logger=logger, storage_root=data_root)
     prompt_manager = PromptManager(
-        prompt_dir=data_root / "prompts",
+        prompt_dir=runtime_root / "prompts",
         fallback_prompt_dir=code_root / "prompts",
     )
     gemini_client = GeminiClient(secret_store=secret_store, logger=logger)
@@ -105,8 +142,16 @@ def build_app_context(data_root: Path, code_root: Path) -> AppContext:
         send_log_repository=send_log_repository,
         logger=logger,
     )
-    mail_template_service = MailTemplateService(mail_template_repository, portable_root=data_root)
-    template_service = TemplateService(template_repository, portable_root=data_root)
+    mail_template_service = MailTemplateService(
+        mail_template_repository,
+        portable_root=data_root,
+        attachments_subdir=Path("cache") / "templates" / "presets",
+    )
+    template_service = TemplateService(
+        template_repository,
+        portable_root=data_root,
+        attachments_subdir=Path("cache") / "templates" / "attachments",
+    )
     scheduler_manager = SchedulerManager(
         config_manager=config_manager,
         template_repository=template_repository,
@@ -121,7 +166,7 @@ def build_app_context(data_root: Path, code_root: Path) -> AppContext:
         config_manager=config_manager,
         secret_store=secret_store,
         logger=logger,
-        logger_path=data_root / "logs" / "mailai.log",
+        logger_path=runtime_root / "logs" / "mailai.log",
         mail_repository=mail_repository,
         send_log_repository=send_log_repository,
         mail_template_service=mail_template_service,
