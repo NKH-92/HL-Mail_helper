@@ -20,8 +20,13 @@ class AddressBookServiceTests(unittest.TestCase):
         self.data_root.mkdir(parents=True, exist_ok=True)
 
     def _write_csv(self, path: Path, rows: list[dict[str, str]]) -> None:
+        fieldnames: list[str] = []
+        for row in rows:
+            for key in row.keys():
+                if key not in fieldnames:
+                    fieldnames.append(key)
         with path.open("w", encoding="utf-8-sig", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=["name", "department", "title", "email", "company"])
+            writer = csv.DictWriter(handle, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows)
 
@@ -143,6 +148,68 @@ class AddressBookServiceTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             service.resolve_recipient_tokens("Alex Kim")
+
+    def test_resolve_user_address_aliases_includes_alias_and_owned_group_addresses(self) -> None:
+        source_csv = self.bundle_root / "directory.csv"
+        self._write_csv(
+            source_csv,
+            [
+                {
+                    "name": "Dana Lee",
+                    "department": "Quality",
+                    "title": "Lead",
+                    "email": "dana@example.com",
+                    "company": "MailAI",
+                    "alias_emails": "qa.lead@example.com",
+                    "group_aliases": "quality-group@example.com",
+                }
+            ],
+        )
+        service = AddressBookService(data_root=self.data_root, bundle_root=self.bundle_root)
+
+        aliases = service.resolve_user_address_aliases(
+            AppConfig(
+                user_email="dana@example.com",
+                user_display_name="Dana Lee",
+                user_department="Quality",
+                user_job_title="Lead",
+            )
+        )
+
+        self.assertEqual(
+            aliases,
+            ["dana@example.com", "qa.lead@example.com", "quality-group@example.com"],
+        )
+
+    def test_resolve_user_routing_profile_splits_direct_and_group_addresses(self) -> None:
+        source_csv = self.bundle_root / "directory.csv"
+        self._write_csv(
+            source_csv,
+            [
+                {
+                    "name": "Dana Lee",
+                    "department": "Quality",
+                    "title": "Lead",
+                    "email": "dana@example.com",
+                    "company": "MailAI",
+                    "alias_emails": "qa.lead@example.com",
+                    "group_aliases": "quality-group@example.com; quality-all@example.com",
+                }
+            ],
+        )
+        service = AddressBookService(data_root=self.data_root, bundle_root=self.bundle_root)
+
+        profile = service.resolve_user_routing_profile(
+            AppConfig(
+                user_email="dana@example.com",
+                user_display_name="Dana Lee",
+                user_department="Quality",
+                user_job_title="Lead",
+            )
+        )
+
+        self.assertEqual(profile.direct_addresses, ("dana@example.com", "qa.lead@example.com"))
+        self.assertEqual(profile.cc_only_addresses, ("quality-group@example.com", "quality-all@example.com"))
 
 
 if __name__ == "__main__":

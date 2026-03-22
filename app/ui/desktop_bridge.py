@@ -14,7 +14,9 @@ from app.db.models import MailTemplate, SendTemplate
 from app.runtime_context import AppContext
 from app.ui.page_config import (
     ALL_PAGES,
+    ARCHIVE_PAGE,
     AUTO_SEND_PAGE,
+    COMPLETED_PAGE,
     DASHBOARD_PAGE,
     HELP_PAGE,
     LOGS_PAGE,
@@ -26,6 +28,7 @@ from app.ui.ui_state_helpers import (
     build_follow_up_mail_template,
     build_classified_mail_dicts,
     build_dashboard_mail_category_counts,
+    build_dashboard_mail_page_context,
     build_mail_template_from_payload,
     build_mailbox_test_submission,
     build_send_registration_from_payload,
@@ -35,6 +38,8 @@ from app.ui.ui_state_helpers import (
     normalize_dashboard_mail_tab,
     normalize_dashboard_mail_view,
     read_log_tail,
+    resolve_dashboard_mail_tab_for_counts,
+    resolve_dashboard_mail_tab_key,
     validate_send_template,
 )
 
@@ -42,6 +47,7 @@ from app.ui.ui_state_helpers import (
 TRAY_TODO_POPUP = "todos"
 TRAY_AUTO_SEND_POPUP = "autosend"
 _ADDRESS_BOOK_PAGES = {AUTO_SEND_PAGE}
+_DASHBOARD_COLLECTION_PAGES = {DASHBOARD_PAGE, ARCHIVE_PAGE, COMPLETED_PAGE}
 
 
 @dataclass(slots=True)
@@ -151,13 +157,16 @@ class DesktopApi:
                     self.state.current_page = requested_page
                 return self._build_page_state(self.state.current_page)
 
+            page_override: str | None = None
             try:
-                self._handle_action(action, payload)
+                page_override = self._handle_action(action, payload)
             except Exception as exc:  # noqa: BLE001
                 self.context.logger.exception("Desktop UI action failed: %s", exc)
                 self.state.flash_message = mask_sensitive_text(str(exc)) or "Unexpected error"
 
-            if requested_page in ALL_PAGES:
+            if page_override in ALL_PAGES:
+                self.state.current_page = page_override
+            elif requested_page in ALL_PAGES:
                 self.state.current_page = requested_page
             return self._build_page_state(self.state.current_page)
 
@@ -170,6 +179,17 @@ class DesktopApi:
             if popup_kind == TRAY_AUTO_SEND_POPUP:
                 return self._build_autosend_popup_html()
             return self._wrap_popup_html("MailAI Portable", "<p>지원하지 않는 팝업입니다.</p>", popup_kind)
+
+    def get_popup_collection_html(self, popup_kind: str, collection_key: str) -> str:
+        """Return one lazily loaded tray popup collection section."""
+
+        with self._lock:
+            if popup_kind != TRAY_TODO_POPUP:
+                return ""
+            normalized_collection_key = _normalize_popup_collection_key(collection_key)
+            if not normalized_collection_key:
+                return "<div class='tray-popup-empty'>지원하지 않는 목록입니다.</div>"
+            return _build_popup_collection_content_html(self.context, normalized_collection_key)
 
     def pick_attachment_files(self) -> list[str]:
         with self._lock:
@@ -288,7 +308,7 @@ class DesktopApi:
             self._sync_thread = None
             self.state.flash_message = self._sync_progress.message
 
-    def _handle_action(self, action: str, payload: dict[str, Any]) -> None:
+    def _handle_action(self, action: str, payload: dict[str, Any]) -> str | None:
         if not action:
             return
 
@@ -311,12 +331,56 @@ class DesktopApi:
                     self.context.mail_repository.update_status(mail_id, "doing")
             return
 
-            if action == "select_mail":
-                selected_mail_id = _normalize_positive_int(payload.get("mail_id"))
-                if selected_mail_id:
-                    self.state.selected_mail_id = selected_mail_id
+        if action == "select_mail":
+            selected_mail_id = _normalize_positive_int(payload.get("mail_id"))
+            if selected_mail_id:
+                self.state.selected_mail_id = selected_mail_id
+                self.state.dashboard_mail_view = "detail"
+            return
+
+        if action == "archive_mail":
+            mail_id = _normalize_positive_int(payload.get("mail_id"))
+            if mail_id:
+                moved_mail = self.context.mail_repository.move_mail_retention_bucket(mail_id, "archived")
+                if moved_mail is None:
+                    self.state.flash_message = "메일 이동에 실패했습니다. 다시 시도해 주세요."
+                    return
+                if self.state.selected_mail_id == mail_id:
+                    self.state.dashboard_mail_view = "list"
+                self.state.flash_message = "메일을 보관함으로 이동했습니다."
+            return
+
+        if action == "complete_mail":
+            mail_id = _normalize_positive_int(payload.get("mail_id"))
+            if mail_id:
+                mail = self.context.mail_repository.move_mail_retention_bucket(mail_id, "completed")
+                if mail is None:
+                    self.state.flash_message = "메일 이동에 실패했습니다. 다시 시도해 주세요."
+                    return
+                if self.state.current_page == ARCHIVE_PAGE:
+                    self.state.dashboard_mail_tab = resolve_dashboard_mail_tab_key(mail)
+                    self.state.selected_mail_id = mail_id
                     self.state.dashboard_mail_view = "detail"
-                return
+                    self.state.flash_message = "메일을 완료 목록으로 이동했습니다."
+                    return COMPLETED_PAGE
+                if self.state.selected_mail_id == mail_id:
+                    self.state.dashboard_mail_view = "list"
+                self.state.flash_message = "메일을 완료 목록으로 이동했습니다."
+            return
+
+        if action == "restore_mail":
+            mail_id = _normalize_positive_int(payload.get("mail_id"))
+            if mail_id:
+                mail = self.context.mail_repository.move_mail_retention_bucket(mail_id, "classified")
+                if mail is None:
+                    self.state.flash_message = "메일 복구에 실패했습니다. 다시 시도해 주세요."
+                    return
+                self.state.dashboard_mail_tab = resolve_dashboard_mail_tab_key(mail)
+                self.state.selected_mail_id = mail_id
+                self.state.dashboard_mail_view = "detail"
+                self.state.flash_message = "메일을 분류 목록으로 복구했습니다."
+                return DASHBOARD_PAGE
+            return
 
         if action == "save_settings":
             next_config, pwd, api_key, hanlim_api_key = build_settings_submission(
@@ -511,7 +575,8 @@ class DesktopApi:
         }
         self.state.flash_message = None
 
-        if current_page == DASHBOARD_PAGE:
+        if current_page in _DASHBOARD_COLLECTION_PAGES:
+            dashboard_page_context = build_dashboard_mail_page_context(_page_id(current_page))
             component_args["sync_status"] = build_sync_status_dict(
                 config,
                 sync_snapshot=self.context.sync_service.get_status_snapshot(),
@@ -519,7 +584,15 @@ class DesktopApi:
                 analysis_warning=self.context.mailbox_service.get_analysis_warning(),
                 backlog_counts=self.context.mail_repository.count_analysis_backlog(),
             )
-            classified_mails = self.context.mail_repository.list_classified_mails(limit=200)
+            classified_mails = self.context.mail_repository.list_dashboard_mails(
+                str(dashboard_page_context.get("bucket_key") or "classified"),
+                limit=200,
+            )
+            category_counts = build_dashboard_mail_category_counts(classified_mails)
+            self.state.dashboard_mail_tab = resolve_dashboard_mail_tab_for_counts(
+                self.state.dashboard_mail_tab,
+                category_counts,
+            )
             visible_mail_ids = [mail.id for mail in classified_mails]
             if self.state.selected_mail_id not in visible_mail_ids:
                 self.state.selected_mail_id = visible_mail_ids[0] if visible_mail_ids else 0
@@ -527,9 +600,10 @@ class DesktopApi:
                 classified_mails,
                 address_book_service=self.context.address_book_service,
             )
+            component_args["dashboard_section"] = dashboard_page_context
             component_args["dashboard_mail_tab"] = self.state.dashboard_mail_tab
             component_args["dashboard_mail_view"] = self.state.dashboard_mail_view
-            component_args["dashboard_mail_category_counts"] = build_dashboard_mail_category_counts(classified_mails)
+            component_args["dashboard_mail_category_counts"] = category_counts
             component_args["selected_mail_id"] = self.state.selected_mail_id
 
         elif current_page == AUTO_SEND_PAGE:
@@ -1053,14 +1127,22 @@ _POPUP_ACTION_LABELS = {
 }
 
 
-def _build_popup_classified_mail_payload(
+_POPUP_COLLECTION_LABELS = {
+    "classified": "메일 분류",
+    "archived": "보관함",
+    "completed": "완료",
+}
+
+
+def _build_popup_mail_collection_payload(
     context: AppContext,
+    bucket: str,
     *,
     visible_limit: int | None = None,
-    count_limit: int = 200,
 ) -> tuple[list[dict[str, object]], dict[str, int]]:
-    mails = context.mail_repository.list_classified_mails(limit=count_limit)
-    counts = build_dashboard_mail_category_counts(mails)
+    counts = context.mail_repository.count_dashboard_mail_categories(bucket)
+    mail_limit = max(0, int(visible_limit)) if visible_limit is not None else 200
+    mails = context.mail_repository.list_dashboard_mails(bucket, limit=mail_limit)
     if visible_limit is not None:
         mails = mails[: max(0, int(visible_limit))]
     return (
@@ -1070,6 +1152,29 @@ def _build_popup_classified_mail_payload(
         ),
         counts,
     )
+
+
+def _build_popup_classified_mail_payload(
+    context: AppContext,
+    *,
+    visible_limit: int | None = None,
+) -> tuple[list[dict[str, object]], dict[str, int]]:
+    return _build_popup_mail_collection_payload(
+        context,
+        "classified",
+        visible_limit=visible_limit,
+    )
+
+
+def _normalize_popup_collection_key(value: object) -> str:
+    normalized = str(value or "").strip().lower()
+    return normalized if normalized in _POPUP_COLLECTION_LABELS else ""
+
+
+def _popup_total_count(counts: dict[str, int] | None) -> int:
+    if not isinstance(counts, dict):
+        return 0
+    return sum(int(value or 0) for value in counts.values())
 
 
 def _popup_category_label(final_category: object) -> str:
@@ -1206,6 +1311,74 @@ def _build_popup_tabbed_mail_sections(
         f"{''.join(panels)}"
         "</div>"
     )
+
+
+def _build_popup_collection_sections(
+    context: AppContext,
+    collection_counts: dict[str, dict[str, int]],
+    *,
+    active_bucket: str = "classified",
+) -> str:
+    tab_order = ("classified", "archived", "completed")
+    buttons: list[str] = []
+    panels: list[str] = []
+    for index, bucket_key in enumerate(tab_order):
+        counts = collection_counts.get(bucket_key, {})
+        is_active = bucket_key == active_bucket if active_bucket in tab_order else index == 0
+        active_class = " is-active" if is_active else ""
+        selected_attr = "true" if is_active else "false"
+        total_count = _popup_total_count(counts)
+        label = _POPUP_COLLECTION_LABELS.get(bucket_key, bucket_key)
+        panels.append(
+            (
+                "<section"
+                f" class='tray-popup-tab-panel{active_class}'"
+                f" data-popup-tab-panel='bucket_{bucket_key}'"
+                f" data-popup-collection='{bucket_key}'"
+                f" data-popup-loaded='{'true' if is_active else 'false'}'"
+                f" aria-hidden='{'false' if is_active else 'true'}'>"
+                f"{_build_popup_collection_content_html(context, bucket_key) if is_active else _build_popup_collection_loading_html()}"
+                "</section>"
+            )
+        )
+        buttons.append(
+            (
+                "<button"
+                " type='button'"
+                f" class='tray-popup-tab-button{active_class}'"
+                f" data-popup-tab='bucket_{bucket_key}'"
+                f" aria-selected='{selected_attr}'"
+                " role='tab'>"
+                f"<span>{escape(label)}</span>"
+                f"<span class='tray-popup-tab-count'>{total_count}</span>"
+                "</button>"
+            )
+        )
+
+    return (
+        "<div class='tray-popup-tab-shell' data-popup-tab-root>"
+        f"<div class='tray-popup-tab-list' role='tablist'>{''.join(buttons)}</div>"
+        f"{''.join(panels)}"
+        "</div>"
+    )
+
+
+def _build_popup_collection_content_html(
+    context: AppContext,
+    bucket_key: str,
+    *,
+    visible_limit: int | None = None,
+) -> str:
+    mails, counts = _build_popup_mail_collection_payload(
+        context,
+        bucket_key,
+        visible_limit=visible_limit,
+    )
+    return _humanize_popup_datetime_tokens(_build_popup_tabbed_mail_sections(mails, counts))
+
+
+def _build_popup_collection_loading_html() -> str:
+    return "<div class='tray-popup-empty'>불러오는 중...</div>"
 
 
 def _desktop_api_build_todo_popup_html_v2(self: DesktopApi) -> str:
@@ -1974,13 +2147,17 @@ DesktopApi._wrap_popup_html = _desktop_api_wrap_popup_html_v4
 
 
 def _desktop_api_build_todo_popup_html_v4(self: DesktopApi) -> str:
-    classified_mails, counts = _build_popup_classified_mail_payload(self.context)
+    collection_counts = {
+        "classified": self.context.mail_repository.count_dashboard_mail_categories("classified"),
+        "archived": self.context.mail_repository.count_dashboard_mail_categories("archived"),
+        "completed": self.context.mail_repository.count_dashboard_mail_categories("completed"),
+    }
     now = datetime.now()
     summary = (
         "<div class='tray-popup-metrics'>"
-        f"{_metric_card('내가해야할일', counts.get('category_1', 0))}"
-        f"{_metric_card('내가검토할일', counts.get('category_2', 0))}"
-        f"{_metric_card('단순 참고용', counts.get('category_3', 0))}"
+        f"{_metric_card('메일 분류', _popup_total_count(collection_counts['classified']))}"
+        f"{_metric_card('보관함', _popup_total_count(collection_counts['archived']))}"
+        f"{_metric_card('완료', _popup_total_count(collection_counts['completed']))}"
         f"{_metric_card('마지막 갱신', now.strftime('%Y-%m-%d %H:%M'))}"
         "</div>"
     )
@@ -1988,7 +2165,7 @@ def _desktop_api_build_todo_popup_html_v4(self: DesktopApi) -> str:
         f"{_popup_header('Tray', '메일 분류', '현재 수신 메일을 내가해야할일, 내가검토할일, 단순 참고용으로 빠르게 확인할 수 있습니다.')}"
         f"{summary}"
         f"{_popup_refresh_bar_v2()}"
-        f"{_build_popup_tabbed_mail_sections(classified_mails, counts)}"
+        f"{_build_popup_collection_sections(self.context, collection_counts)}"
     )
     html = self._wrap_popup_html("MailAI | 메일 분류", body, TRAY_TODO_POPUP)
     return _humanize_popup_datetime_tokens(html)
@@ -2053,41 +2230,79 @@ def _desktop_api_wrap_popup_html_v5(self: DesktopApi, title: str, body: str, pop
     }
 """
     tab_js = """
-    function initPopupTabs() {
-      const root = document.querySelector("[data-popup-tab-root]");
-      if (!root) {
+    async function loadPopupCollectionPanel(panel) {
+      if (!panel) {
+        return;
+      }
+      const bucketKey = panel.getAttribute("data-popup-collection") || "";
+      const loadedState = panel.getAttribute("data-popup-loaded") || "";
+      if (!bucketKey || loadedState === "true" || loadedState === "loading") {
+        return;
+      }
+      if (!(window.pywebview && window.pywebview.api && window.pywebview.api.get_popup_collection_html)) {
+        panel.innerHTML = "<div class='tray-popup-empty'>세부 목록을 불러올 수 없습니다.</div>";
+        panel.setAttribute("data-popup-loaded", "error");
         return;
       }
 
-      const buttons = Array.from(root.querySelectorAll("[data-popup-tab]"));
-      const panels = Array.from(root.querySelectorAll("[data-popup-tab-panel]"));
-      if (!buttons.length || !panels.length) {
-        return;
+      panel.setAttribute("data-popup-loaded", "loading");
+      panel.innerHTML = "<div class='tray-popup-empty'>불러오는 중...</div>";
+      try {
+        const html = await window.pywebview.api.get_popup_collection_html("todos", bucketKey);
+        panel.innerHTML = html || "<div class='tray-popup-empty'>표시할 메일이 없습니다.</div>";
+        panel.setAttribute("data-popup-loaded", "true");
+        initPopupTabs(panel);
+      } catch (error) {
+        panel.innerHTML = "<div class='tray-popup-empty'>세부 목록을 불러오지 못했습니다.</div>";
+        panel.setAttribute("data-popup-loaded", "error");
       }
+    }
 
-      function setActiveTab(tabKey) {
+    function initPopupTabs(scope) {
+      const rootNode = scope || document;
+      const roots = Array.from(rootNode.querySelectorAll("[data-popup-tab-root]")).filter(
+        (root) => root.getAttribute("data-popup-tab-initialized") !== "true",
+      );
+      roots.forEach((root) => {
+        root.setAttribute("data-popup-tab-initialized", "true");
+        const tabList = root.querySelector(":scope > .tray-popup-tab-list");
+        const buttons = tabList ? Array.from(tabList.querySelectorAll(":scope > [data-popup-tab]")) : [];
+        const panels = Array.from(root.querySelectorAll(":scope > [data-popup-tab-panel]"));
+        if (!buttons.length || !panels.length) {
+          return;
+        }
+
+        async function setActiveTab(tabKey) {
+          let activePanel = null;
+          buttons.forEach((button) => {
+            const isActive = button.getAttribute("data-popup-tab") === tabKey;
+            button.classList.toggle("is-active", isActive);
+            button.setAttribute("aria-selected", isActive ? "true" : "false");
+          });
+          panels.forEach((panel) => {
+            const isActive = panel.getAttribute("data-popup-tab-panel") === tabKey;
+            if (isActive) {
+              activePanel = panel;
+            }
+            panel.classList.toggle("is-active", isActive);
+            panel.setAttribute("aria-hidden", isActive ? "false" : "true");
+          });
+          if (activePanel) {
+            await loadPopupCollectionPanel(activePanel);
+          }
+        }
+
         buttons.forEach((button) => {
-          const isActive = button.getAttribute("data-popup-tab") === tabKey;
-          button.classList.toggle("is-active", isActive);
-          button.setAttribute("aria-selected", isActive ? "true" : "false");
+          button.addEventListener("click", () => {
+            void setActiveTab(button.getAttribute("data-popup-tab") || "");
+          });
         });
-        panels.forEach((panel) => {
-          const isActive = panel.getAttribute("data-popup-tab-panel") === tabKey;
-          panel.classList.toggle("is-active", isActive);
-          panel.setAttribute("aria-hidden", isActive ? "false" : "true");
-        });
-      }
 
-      buttons.forEach((button) => {
-        button.addEventListener("click", () => {
-          setActiveTab(button.getAttribute("data-popup-tab") || "");
-        });
+        const initialButton = buttons.find((button) => button.classList.contains("is-active")) || buttons[0];
+        if (initialButton) {
+          void setActiveTab(initialButton.getAttribute("data-popup-tab") || "");
+        }
       });
-
-      const initialButton = buttons.find((button) => button.classList.contains("is-active")) || buttons[0];
-      if (initialButton) {
-        setActiveTab(initialButton.getAttribute("data-popup-tab") || "");
-      }
     }
 
     initPopupTabs();

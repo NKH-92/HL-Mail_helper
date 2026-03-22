@@ -24,6 +24,7 @@ from app.db.models import (
 
 
 LOW_CONFIDENCE_THRESHOLD = 0.65
+MAIL_RETENTION_BUCKETS = {"classified", "archived", "completed"}
 
 
 def now_iso() -> str:
@@ -62,6 +63,28 @@ def _collapse_text(value: str | None, limit: int = 160) -> str:
     if len(collapsed) <= limit:
         return collapsed
     return f"{collapsed[: max(0, limit - 3)].rstrip()}..."
+
+
+def _normalize_mail_retention_bucket(value: object) -> str:
+    """Normalize dashboard retention buckets to known values."""
+
+    normalized = str(value or "").strip().lower()
+    return normalized if normalized in MAIL_RETENTION_BUCKETS else "classified"
+
+
+def _truncate_for_ai_context(value: str | None, limit: int = 420) -> str:
+    """Keep both the beginning and end of long text for LLM context."""
+
+    collapsed = " ".join((value or "").split())
+    if len(collapsed) <= limit:
+        return collapsed
+    if limit <= 80:
+        return f"{collapsed[: max(0, limit - 5)].rstrip()} ..."
+    head_length = min(max(40, int(limit * 0.55)), max(40, limit - 65))
+    tail_length = max(20, limit - head_length - 5)
+    if head_length + tail_length >= len(collapsed):
+        return collapsed
+    return f"{collapsed[:head_length].rstrip()} ... {collapsed[-tail_length:].lstrip()}"
 
 
 def _format_short_datetime(value: str | None) -> str:
@@ -295,10 +318,10 @@ class MailRepository:
                 """
                 INSERT OR IGNORE INTO mails (
                     message_id, subject, normalized_subject, thread_key, in_reply_to, references_json,
-                    sender_name, sender_email, to_list_json, cc_list_json, received_at, raw_preview,
+                    sender_name, sender_email, to_list_json, cc_list_json, received_at, body_text, raw_preview,
                     attachment_names_json, attachment_paths_json, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     parsed_mail.message_id,
@@ -312,6 +335,7 @@ class MailRepository:
                     json.dumps(parsed_mail.to_list, ensure_ascii=False),
                     json.dumps(parsed_mail.cc_list, ensure_ascii=False),
                     parsed_mail.received_at.isoformat(sep=" ") if parsed_mail.received_at else None,
+                    parsed_mail.body_text,
                     parsed_mail.raw_preview,
                     json.dumps(parsed_mail.attachment_names, ensure_ascii=False),
                     json.dumps(parsed_mail.attachment_paths, ensure_ascii=False),
@@ -381,7 +405,10 @@ class MailRepository:
                 """
                 SELECT attachment_paths_json
                 FROM mails
-                WHERE received_at IS NOT NULL AND datetime(received_at) < datetime(?)
+                WHERE
+                    received_at IS NOT NULL
+                    AND datetime(received_at) < datetime(?)
+                    AND COALESCE(retention_bucket, 'classified') != 'archived'
                 """,
                 (cutoff_text,),
             ).fetchall()
@@ -394,7 +421,10 @@ class MailRepository:
             cursor = connection.execute(
                 """
                 DELETE FROM mails
-                WHERE received_at IS NOT NULL AND datetime(received_at) < datetime(?)
+                WHERE
+                    received_at IS NOT NULL
+                    AND datetime(received_at) < datetime(?)
+                    AND COALESCE(retention_bucket, 'classified') != 'archived'
                 """,
                 (cutoff_text,),
             )
@@ -434,12 +464,12 @@ class MailRepository:
                 """
                 (
                     subject LIKE ? OR normalized_subject LIKE ? OR sender_email LIKE ? OR
-                    sender_name LIKE ? OR raw_preview LIKE ? OR category LIKE ?
+                    sender_name LIKE ? OR raw_preview LIKE ? OR body_text LIKE ? OR category LIKE ?
                 )
                 """
             )
             like_value = f"%{search_text.strip()}%"
-            params.extend([like_value, like_value, like_value, like_value, like_value, like_value])
+            params.extend([like_value, like_value, like_value, like_value, like_value, like_value, like_value])
 
         filter_map = {
             "직접조치": "my_action_status = 'direct_action'",
@@ -475,6 +505,113 @@ class MailRepository:
             rows = connection.execute(query, params).fetchall()
         return [self._row_to_mail_record(row) for row in rows]
 
+    def list_dashboard_mails(self, bucket: str = "classified", limit: int = 200) -> list[MailRecord]:
+        """Return analyzed mails for one dashboard collection."""
+
+        normalized_bucket = _normalize_mail_retention_bucket(bucket)
+
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM mails
+                WHERE
+                    COALESCE(retention_bucket, 'classified') = ?
+                    AND (
+                        final_category IN (1, 2, 3)
+                        OR (
+                            final_category IS NULL
+                            AND analysis_status = 'success'
+                            AND my_action_status IN ('direct_action', 'review_needed', 'reference_only')
+                        )
+                    )
+                ORDER BY
+                    CASE COALESCE(
+                        final_category,
+                        CASE my_action_status
+                            WHEN 'direct_action' THEN 1
+                            WHEN 'review_needed' THEN 2
+                            ELSE 3
+                        END
+                    )
+                        WHEN 1 THEN 0
+                        WHEN 2 THEN 1
+                        ELSE 2
+                    END,
+                    CASE WHEN due_date IS NULL OR due_date = '' THEN 1 ELSE 0 END,
+                    due_date ASC,
+                    CASE urgency
+                        WHEN 'high' THEN 0
+                        WHEN 'medium' THEN 1
+                        WHEN 'low' THEN 2
+                        ELSE 3
+                    END,
+                    received_at DESC,
+                    id DESC
+                LIMIT ?
+                """,
+                (normalized_bucket, limit),
+            ).fetchall()
+        return [self._row_to_mail_record(row) for row in rows]
+
+    def count_dashboard_mail_categories(self, bucket: str = "classified") -> dict[str, int]:
+        """Return category counts for one dashboard collection."""
+
+        normalized_bucket = _normalize_mail_retention_bucket(bucket)
+        counts = {"category_1": 0, "category_2": 0, "category_3": 0}
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    CASE COALESCE(
+                        final_category,
+                        CASE my_action_status
+                            WHEN 'direct_action' THEN 1
+                            WHEN 'review_needed' THEN 2
+                            ELSE 3
+                        END
+                    )
+                        WHEN 1 THEN 'category_1'
+                        WHEN 2 THEN 'category_2'
+                        ELSE 'category_3'
+                    END AS tab_key,
+                    COUNT(*) AS item_count
+                FROM mails
+                WHERE
+                    COALESCE(retention_bucket, 'classified') = ?
+                    AND (
+                        final_category IN (1, 2, 3)
+                        OR (
+                            final_category IS NULL
+                            AND analysis_status = 'success'
+                            AND my_action_status IN ('direct_action', 'review_needed', 'reference_only')
+                        )
+                    )
+                GROUP BY tab_key
+                """,
+                (normalized_bucket,),
+            ).fetchall()
+        for row in rows:
+            tab_key = str(row["tab_key"] or "").strip().lower()
+            if tab_key in counts:
+                counts[tab_key] = int(row["item_count"] or 0)
+        return counts
+
+    def list_classified_mails(self, limit: int = 200) -> list[MailRecord]:
+        """Return analyzed mails for the main 3-tab classification UI."""
+
+        return self.list_dashboard_mails("classified", limit=limit)
+
+    def list_archived_mails(self, limit: int = 200) -> list[MailRecord]:
+        """Return archived mails for the archive page."""
+
+        return self.list_dashboard_mails("archived", limit=limit)
+
+    def list_completed_mails(self, limit: int = 200) -> list[MailRecord]:
+        """Return completed mails for the completed page."""
+
+        return self.list_dashboard_mails("completed", limit=limit)
+
     def get_mail(self, mail_id: int) -> MailRecord | None:
         """Fetch one mail by id."""
 
@@ -493,15 +630,23 @@ class MailRepository:
         if limit <= 0:
             return []
 
-        pending_rows = self._list_analysis_targets_by_status("pending", limit)
-        if not include_failed or len(pending_rows) >= limit:
-            return pending_rows
+        if not include_failed:
+            return self._list_analysis_targets_by_status("pending", limit)
 
-        remaining = limit - len(pending_rows)
-        failed_rows = self._list_analysis_targets_by_status("failed", remaining)
+        failed_rows = self._list_analysis_targets_by_status("failed", 1) if limit > 1 else []
+        pending_rows = self._list_analysis_targets_by_status("pending", limit - len(failed_rows))
+        remaining = limit - len(pending_rows) - len(failed_rows)
+        if remaining > 0:
+            failed_rows.extend(
+                self._list_analysis_targets_by_status("failed", remaining, offset=len(failed_rows))
+            )
+        if not failed_rows:
+            return pending_rows
         return [*pending_rows, *failed_rows]
 
-    def _list_analysis_targets_by_status(self, status: str, limit: int) -> list[MailRecord]:
+    def _list_analysis_targets_by_status(self, status: str, limit: int, *, offset: int = 0) -> list[MailRecord]:
+        if limit <= 0:
+            return []
         with self.database.connect() as connection:
             rows = connection.execute(
                 """
@@ -510,8 +655,9 @@ class MailRepository:
                 WHERE analysis_status = ?
                 ORDER BY received_at DESC, id DESC
                 LIMIT ?
+                OFFSET ?
                 """,
-                (status, limit),
+                (status, limit, max(0, int(offset))),
             ).fetchall()
         return [self._row_to_mail_record(row) for row in rows]
 
@@ -598,6 +744,67 @@ class MailRepository:
             connection.commit()
         self._invalidate_thread_overview_cache([thread_key] if thread_key else None)
 
+    def move_mail_retention_bucket(self, mail_id: int, bucket: str) -> MailRecord | None:
+        """Move one mail between dashboard collections."""
+
+        normalized_bucket = _normalize_mail_retention_bucket(bucket)
+        timestamp = now_iso()
+        moved_row = None
+        thread_key: str | None = None
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing_row = connection.execute(
+                "SELECT thread_key, status, retention_bucket FROM mails WHERE id = ?",
+                (mail_id,),
+            ).fetchone()
+            if not existing_row:
+                connection.rollback()
+                return None
+            thread_key = str(existing_row["thread_key"] or "").strip().lower() if existing_row["thread_key"] else None
+            existing_bucket = _normalize_mail_retention_bucket(existing_row["retention_bucket"])
+            current_status = str(existing_row["status"] or "todo").strip().lower() or "todo"
+            if current_status not in {"todo", "doing", "done"}:
+                current_status = "todo"
+            restoring_completed_mail = existing_bucket == "completed" and normalized_bucket == "classified"
+            next_status = "done" if normalized_bucket == "completed" else current_status
+            if restoring_completed_mail:
+                next_status = "todo"
+            cursor = connection.execute(
+                "UPDATE mails SET retention_bucket = ?, status = ?, updated_at = ? WHERE id = ?",
+                (normalized_bucket, next_status, timestamp, mail_id),
+            )
+            if cursor.rowcount != 1:
+                connection.rollback()
+                return None
+            if normalized_bucket == "completed":
+                connection.execute(
+                    """
+                    UPDATE action_items
+                    SET done_flag = 1,
+                        completed_at = COALESCE(completed_at, ?),
+                        updated_at = ?
+                    WHERE mail_id = ? AND scope = 'my' AND done_flag = 0
+                    """,
+                    (timestamp, timestamp, mail_id),
+                )
+            elif restoring_completed_mail:
+                connection.execute(
+                    """
+                    UPDATE action_items
+                    SET done_flag = 0,
+                        completed_at = NULL,
+                        updated_at = ?
+                    WHERE mail_id = ? AND scope = 'my' AND done_flag = 1
+                    """,
+                    (timestamp, mail_id),
+                )
+            moved_row = connection.execute("SELECT * FROM mails WHERE id = ?", (mail_id,)).fetchone()
+            connection.commit()
+        if moved_row is None:
+            return None
+        self._invalidate_thread_overview_cache([thread_key] if thread_key else None)
+        return self._row_to_mail_record(moved_row)
+
     def list_action_items(self, mail_id: int, scope: str | None = None) -> list[ActionItemRecord]:
         """Fetch mail action items."""
 
@@ -649,8 +856,13 @@ class MailRepository:
                 due_date = ?, my_action_required = ?, my_action_status = ?,
                 action_classification = ?, action_owner = ?, action_type_json = ?,
                 deadline_raw = ?, evidence_json = ?, ownership_reason_json = ?,
-                analysis_reason = ?, suggested_task_title = ?, confidence = ?, analysis_status = 'success',
-                analysis_error = NULL, updated_at = ?
+                analysis_reason = ?, suggested_task_title = ?, confidence = ?,
+                is_to_me = ?, is_cc_me = ?, recipient_role = ?, is_system_sender = ?,
+                is_newsletter_like = ?, sender_type = ?, rule_category = ?, request_present = ?,
+                request_target = ?, request_target_is_me = ?, urgency = ?, llm_category = ?,
+                final_category = ?, correction_applied = ?, correction_reason = ?, conflict_type = ?,
+                model_name = ?, analyzed_at = ?, raw_llm_json = ?, analysis_status = ?,
+                analysis_error = ?, updated_at = ?
             WHERE id = ?
             """,
             (
@@ -670,6 +882,35 @@ class MailRepository:
                 result.get("reason"),
                 result.get("suggested_task_title"),
                 result["confidence"],
+                int(bool(result.get("is_to_me"))),
+                int(bool(result.get("is_cc_me"))),
+                result.get("recipient_role"),
+                int(bool(result.get("is_system_sender"))),
+                int(bool(result.get("is_newsletter_like"))),
+                result.get("sender_type"),
+                result.get("rule_category"),
+                (
+                    int(bool(result.get("request_present")))
+                    if result.get("request_present") is not None
+                    else None
+                ),
+                result.get("request_target"),
+                (
+                    int(bool(result.get("request_target_is_me")))
+                    if result.get("request_target_is_me") is not None
+                    else None
+                ),
+                result.get("urgency"),
+                result.get("llm_category"),
+                result.get("final_category"),
+                int(bool(result.get("correction_applied"))),
+                result.get("correction_reason"),
+                result.get("conflict_type"),
+                result.get("model_name"),
+                result.get("analyzed_at"),
+                result.get("raw_llm_json"),
+                result.get("analysis_status", "success"),
+                result.get("analysis_error"),
                 now_iso(),
                 mail_id,
             ),
@@ -1135,7 +1376,7 @@ class MailRepository:
             bucket.append(self._row_to_mail_record(row))
         return grouped
 
-    def build_thread_summary(self, mail_id: int, limit: int = 5) -> str:
+    def build_thread_summary(self, mail_id: int, limit: int = 3) -> str:
         """Build a compact thread summary for AI input."""
 
         current_mail = self.get_mail(mail_id)
@@ -1146,11 +1387,11 @@ class MailRepository:
         for thread_mail in reversed(self.list_thread_mails(mail_id=mail_id, limit=limit + 1)):
             if thread_mail.id == mail_id:
                 continue
-            snippet = thread_mail.summary_short or thread_mail.raw_preview.replace("\n", " ")
-            snippet = snippet[:180].strip()
+            snippet_source = thread_mail.body_text or thread_mail.raw_preview or thread_mail.summary_short
+            snippet = _truncate_for_ai_context(snippet_source, limit=420).strip()
             context_lines.append(
-                f"- {thread_mail.received_at or '-'} | {thread_mail.sender_email or '-'} | "
-                f"{thread_mail.subject} | {snippet}"
+                f"- Previous message {len(context_lines) + 1} | {thread_mail.received_at or '-'} | "
+                f"{thread_mail.sender_email or '-'} | {thread_mail.subject} | {snippet}"
             )
             if len(context_lines) >= limit:
                 break
@@ -1678,6 +1919,7 @@ class MailRepository:
             to_list=json.loads(row["to_list_json"] or "[]"),
             cc_list=json.loads(row["cc_list_json"] or "[]"),
             received_at=row["received_at"],
+            body_text=row["body_text"] if "body_text" in row.keys() else (row["raw_preview"] or ""),
             raw_preview=row["raw_preview"] or "",
             attachment_names=json.loads(row["attachment_names_json"] or "[]"),
             attachment_paths=_safe_json_list(row["attachment_paths_json"] if "attachment_paths_json" in row.keys() else "[]"),
@@ -1702,6 +1944,36 @@ class MailRepository:
             evidence=_safe_json_list(row["evidence_json"] if "evidence_json" in row.keys() else "[]"),
             analysis_reason=row["analysis_reason"] if "analysis_reason" in row.keys() else None,
             suggested_task_title=row["suggested_task_title"] if "suggested_task_title" in row.keys() else None,
+            is_to_me=bool(row["is_to_me"]) if "is_to_me" in row.keys() else False,
+            is_cc_me=bool(row["is_cc_me"]) if "is_cc_me" in row.keys() else False,
+            recipient_role=row["recipient_role"] if "recipient_role" in row.keys() else None,
+            is_system_sender=bool(row["is_system_sender"]) if "is_system_sender" in row.keys() else False,
+            is_newsletter_like=bool(row["is_newsletter_like"]) if "is_newsletter_like" in row.keys() else False,
+            sender_type=row["sender_type"] if "sender_type" in row.keys() else None,
+            rule_category=row["rule_category"] if "rule_category" in row.keys() else None,
+            request_present=(
+                bool(row["request_present"]) if row["request_present"] is not None else None
+            )
+            if "request_present" in row.keys()
+            else None,
+            request_target=row["request_target"] if "request_target" in row.keys() else None,
+            request_target_is_me=(
+                bool(row["request_target_is_me"]) if row["request_target_is_me"] is not None else None
+            )
+            if "request_target_is_me" in row.keys()
+            else None,
+            urgency=row["urgency"] if "urgency" in row.keys() else None,
+            llm_category=row["llm_category"] if "llm_category" in row.keys() else None,
+            final_category=row["final_category"] if "final_category" in row.keys() else None,
+            correction_applied=bool(row["correction_applied"]) if "correction_applied" in row.keys() else False,
+            correction_reason=row["correction_reason"] if "correction_reason" in row.keys() else None,
+            conflict_type=row["conflict_type"] if "conflict_type" in row.keys() else None,
+            model_name=row["model_name"] if "model_name" in row.keys() else None,
+            analyzed_at=row["analyzed_at"] if "analyzed_at" in row.keys() else None,
+            raw_llm_json=row["raw_llm_json"] if "raw_llm_json" in row.keys() else None,
+            retention_bucket=_normalize_mail_retention_bucket(
+                row["retention_bucket"] if "retention_bucket" in row.keys() else "classified"
+            ),
         )
 
     def _row_to_action_item(self, row: Any) -> ActionItemRecord:

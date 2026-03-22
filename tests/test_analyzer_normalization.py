@@ -2,163 +2,117 @@ from __future__ import annotations
 
 import unittest
 
-from app.ai.analyzer import normalize_analysis_payload
+from app.ai.analyzer import (
+    build_decision_payload,
+    build_rule_result,
+    normalize_analysis_payload,
+    normalize_validation_payload,
+    validate_analysis,
+    validate_validation,
+)
 
 
 class AnalyzerNormalizationTests(unittest.TestCase):
-    def test_normalizes_partial_payload_and_dict_action_items(self) -> None:
+    def test_normalizes_partial_payload_from_legacy_like_keys(self) -> None:
         normalized = normalize_analysis_payload(
             {
-                "category": "FYI",
-                "priority": "low",
-                "mail_action_items": [{"action": "회의자료 확인", "status": "open"}],
-                "my_action_items": [{"task": "종합 리포트 확인", "action_type": "review_needed"}],
-                "evidence": ["종합 리포트 확인 부탁드립니다."],
+                "action_required": True,
+                "action_owner": "me",
+                "action_type": [{"type": "review"}],
+                "evidence": ["Please review and reply today."],
                 "confidence": 0.95,
             },
-            fallback_subject="월간 보고",
+            fallback_subject="Weekly report",
         )
 
-        self.assertEqual(normalized["one_line_summary"], "월간 보고")
-        self.assertEqual(normalized["summary_3lines"], ["월간 보고"])
-        self.assertEqual(normalized["mail_action_items"], ["회의자료 확인"])
-        self.assertEqual(normalized["my_action_items"], ["종합 리포트 확인"])
-        self.assertEqual(normalized["classification"], "ACTION_SHARED")
-        self.assertEqual(normalized["my_action_status"], "review_needed")
-        self.assertTrue(normalized["my_action_required"])
-        self.assertEqual(normalized["action_owner"], "team")
-        self.assertEqual(normalized["evidence"], ["종합 리포트 확인 부탁드립니다."])
+        self.assertTrue(normalized["request_present"])
+        self.assertEqual(normalized["request_target"], "me")
+        self.assertTrue(normalized["request_target_is_me"])
+        self.assertEqual(normalized["action_types"], ["REVIEW"])
+        self.assertEqual(normalized["summary"], "Weekly report")
+        self.assertEqual(normalized["llm_category"], 1)
+        self.assertEqual(normalized["evidence"], ["Please review and reply today."])
 
     def test_prompt_echo_falls_back_to_safe_defaults(self) -> None:
         normalized = normalize_analysis_payload(
             {
-                "instructions": {"task": "회사 메일 분석"},
+                "instructions": {"task": "analyze"},
                 "mail": {"subject": "ignored"},
             },
-            fallback_subject="수동 확인 필요 메일",
+            fallback_subject="Needs review",
         )
 
-        self.assertEqual(normalized["category"], "ETC")
-        self.assertEqual(normalized["priority"], "unknown")
-        self.assertEqual(normalized["classification"], "UNCLEAR")
-        self.assertEqual(normalized["one_line_summary"], "수동 확인 필요 메일")
-        self.assertEqual(normalized["my_action_status"], "reference_only")
-        self.assertFalse(normalized["my_action_required"])
+        self.assertFalse(normalized["request_present"])
+        self.assertEqual(normalized["request_target"], "unknown")
+        self.assertFalse(normalized["request_target_is_me"])
+        self.assertEqual(normalized["action_types"], ["NONE"])
+        self.assertEqual(normalized["summary"], "Needs review")
+        self.assertEqual(normalized["llm_category"], 3)
+        self.assertEqual(normalized["urgency"], "none")
 
     def test_due_date_is_normalized_to_sqlite_friendly_format(self) -> None:
         normalized = normalize_analysis_payload(
             {
-                "category": "ACT",
-                "priority": "high",
-                "one_line_summary": "기한 테스트",
-                "summary_3lines": ["기한 테스트"],
-                "mail_action_items": [],
-                "my_action_required": True,
-                "my_action_status": "direct_action",
-                "my_action_items": ["확인"],
-                "evidence": ["3월 8일 17:30까지 확인 부탁드립니다."],
+                "request_present": True,
+                "request_target": "me",
+                "request_target_is_me": True,
+                "action_types": ["REPLY"],
+                "summary": "Deadline test",
                 "due_date": "2026/03/08 17:30",
-                "confidence": 0.9,
-            }
-        )
-        dropped = normalize_analysis_payload(
-            {
-                "category": "ACT",
-                "priority": "high",
-                "one_line_summary": "기한 테스트",
-                "summary_3lines": ["기한 테스트"],
-                "mail_action_items": [],
-                "my_action_required": True,
-                "my_action_status": "direct_action",
-                "my_action_items": ["확인"],
-                "evidence": ["가능하면 다음 주 화요일까지 봐 주세요."],
-                "due_date": "next Tuesday",
+                "llm_category": 1,
+                "evidence": ["Please confirm by 2026/03/08 17:30."],
                 "confidence": 0.9,
             }
         )
 
         self.assertEqual(normalized["due_date"], "2026-03-08 17:30:00")
-        self.assertIsNone(dropped["due_date"])
 
-    def test_actionable_result_without_evidence_downgrades_to_unclear(self) -> None:
+    def test_actionable_result_without_evidence_lowers_confidence(self) -> None:
         normalized = normalize_analysis_payload(
             {
-                "classification": "ACTION_SELF",
-                "priority": "high",
-                "one_line_summary": "근거 없는 요청",
-                "summary_3lines": ["근거 없는 요청"],
-                "my_action_required": True,
-                "my_action_status": "direct_action",
-                "my_action_items": ["회신"],
+                "request_present": True,
+                "request_target": "me",
+                "request_target_is_me": True,
+                "action_types": ["REPLY"],
+                "summary": "Request without evidence",
+                "llm_category": 1,
                 "confidence": 0.9,
             }
         )
 
-        self.assertEqual(normalized["classification"], "UNCLEAR")
-        self.assertFalse(normalized["my_action_required"])
-        self.assertEqual(normalized["my_action_status"], "reference_only")
-        self.assertEqual(normalized["my_action_items"], [])
+        self.assertTrue(normalized["request_present"])
+        self.assertEqual(normalized["evidence"], [])
+        self.assertLessEqual(normalized["confidence"], 0.35)
 
-    def test_nested_deadline_and_suggested_task_title_are_preserved(self) -> None:
+    def test_nested_deadline_and_request_fields_are_preserved(self) -> None:
         normalized = normalize_analysis_payload(
             {
-                "classification": "APPROVAL_REQUEST",
-                "priority": "medium",
-                "one_line_summary": "결재 요청",
-                "summary_3lines": ["결재 요청"],
-                "action_required": True,
-                "action_owner": "me",
-                "action_type": ["approve"],
-                "deadline": {"raw": "오늘 오후 5시까지", "iso": "2026-03-08T17:00"},
-                "evidence": ["오늘 오후 5시까지 승인 부탁드립니다."],
-                "reason": "승인 요청이 직접 확인됩니다.",
-                "suggested_task_title": "결재 승인",
+                "request_present": True,
+                "request_target": "me",
+                "request_target_is_me": True,
+                "action_types": ["APPROVE"],
+                "summary": "Approval request",
+                "deadline": {"raw": "today 5 PM", "iso": "2026-03-08T17:00"},
+                "evidence": ["Please approve by today 5 PM."],
+                "llm_category": 1,
                 "confidence": 0.88,
             }
         )
 
-        self.assertEqual(normalized["classification"], "APPROVAL_REQUEST")
         self.assertEqual(normalized["due_date"], "2026-03-08 17:00:00")
-        self.assertEqual(normalized["deadline_raw"], "오늘 오후 5시까지")
-        self.assertEqual(normalized["my_action_items"], ["결재 승인"])
-        self.assertEqual(normalized["suggested_task_title"], "결재 승인")
+        self.assertEqual(normalized["deadline_raw"], "today 5 PM")
+        self.assertEqual(normalized["action_types"], ["APPROVE"])
 
-
-    def test_deadline_raw_is_normalized_against_received_time(self) -> None:
+    def test_deadline_is_inferred_from_evidence_when_model_omits_due_date(self) -> None:
         normalized = normalize_analysis_payload(
             {
-                "classification": "ACTION_SELF",
-                "priority": "high",
-                "one_line_summary": "Reply requested",
-                "summary_3lines": ["Reply requested"],
-                "mail_action_items": ["Send reply"],
-                "my_action_required": True,
-                "my_action_status": "direct_action",
-                "my_action_items": ["Send reply"],
-                "deadline_raw": "Friday 2:30 PM",
-                "evidence": ["Please reply by Friday 2:30 PM."],
-                "reason": "The sender asked for a response by Friday afternoon.",
-                "confidence": 0.9,
-            },
-            received_at="2026-03-11 09:00:00",
-        )
-
-        self.assertEqual(normalized["due_date"], "2026-03-13 14:30:00")
-        self.assertEqual(normalized["deadline_raw"], "Friday 2:30 PM")
-
-    def test_deadline_is_inferred_from_evidence_when_model_omits_deadline_fields(self) -> None:
-        normalized = normalize_analysis_payload(
-            {
-                "classification": "ACTION_SELF",
-                "priority": "high",
-                "one_line_summary": "Send the revised quote",
-                "summary_3lines": ["Vendor requested the revised quote."],
-                "mail_action_items": ["Send revised quote"],
-                "my_action_required": True,
-                "my_action_status": "direct_action",
-                "my_action_items": ["Send revised quote"],
+                "request_present": True,
+                "request_target": "me",
+                "request_target_is_me": True,
+                "action_types": ["REPLY"],
+                "summary": "Reply requested",
                 "evidence": ["Please reply by Friday 2 PM."],
-                "reason": "The sender expects the revised quote by Friday afternoon.",
+                "llm_category": 1,
                 "confidence": 0.91,
             },
             body_text="Please reply by Friday 2 PM.",
@@ -167,6 +121,120 @@ class AnalyzerNormalizationTests(unittest.TestCase):
 
         self.assertEqual(normalized["due_date"], "2026-03-13 14:00:00")
         self.assertEqual(normalized["deadline_raw"], "Please reply by Friday 2 PM.")
+
+    def test_build_decision_payload_preserves_deadline_raw_text(self) -> None:
+        normalized = normalize_analysis_payload(
+            {
+                "request_present": True,
+                "request_target": "me",
+                "request_target_is_me": True,
+                "action_types": ["REPLY"],
+                "summary": "Reply by Friday",
+                "deadline": {"raw": "Friday 2 PM", "iso": "2026-03-13 14:00:00"},
+                "evidence": ["Please reply by Friday 2 PM."],
+                "llm_category": 1,
+                "confidence": 0.9,
+            }
+        )
+        rule_result = build_rule_result(
+            user_email="user@example.com",
+            sender_email="sender@example.com",
+            to_list=["user@example.com"],
+            cc_list=[],
+            subject="Reply",
+            body_text="Please reply by Friday 2 PM.",
+            thread_id="thread-deadline",
+            message_id="msg-deadline",
+        )
+
+        decision_payload = build_decision_payload(
+            rule_result=rule_result,
+            analysis=validate_analysis(normalized),
+            model_name="model",
+            analyzed_at="2026-03-08 09:00:00",
+            raw_llm_json="{}",
+            deadline_raw=normalized["deadline_raw"],
+        )
+
+        self.assertEqual(decision_payload["due_date"], "2026-03-13 14:00:00")
+        self.assertEqual(decision_payload["deadline_raw"], "Friday 2 PM")
+
+    def test_validation_payload_recomputes_final_category_from_policy(self) -> None:
+        rule_result = build_rule_result(
+            user_email="user@example.com",
+            sender_email="sender@example.com",
+            to_list=["user@example.com"],
+            cc_list=[],
+            subject="FYI",
+            body_text="Sharing the latest status only.",
+            thread_id="thread-1",
+            message_id="msg-1",
+        )
+        normalized = normalize_validation_payload(
+            {
+                "is_valid": False,
+                "corrected_result": {
+                    "request_present": False,
+                    "request_target": "unknown",
+                    "request_target_is_me": False,
+                    "action_types": ["NONE"],
+                    "due_date": None,
+                    "urgency": "none",
+                    "llm_category": 3,
+                    "final_category": 1,
+                    "evidence": ["Sharing the latest status only."],
+                    "summary": "Informational update",
+                    "confidence": 0.74,
+                },
+                "issues": ["Candidate overcalled the email as actionable."],
+            },
+            fallback_subject="FYI",
+            body_text="Sharing the latest status only.",
+            rule_result=rule_result,
+        )
+        validated = validate_validation(normalized)
+
+        self.assertFalse(validated.is_valid)
+        self.assertEqual(validated.corrected_result.final_category, 3)
+        self.assertEqual(validated.corrected_result.urgency, "none")
+        self.assertIn("Candidate overcalled the email as actionable.", validated.issues)
+
+    def test_rule_result_treats_known_aliases_as_my_recipients(self) -> None:
+        rule_result = build_rule_result(
+            user_email="user@example.com",
+            known_recipient_addresses=["user@example.com", "qa.alias@example.com"],
+            sender_email="sender@example.com",
+            to_list=["qa.alias@example.com"],
+            cc_list=[],
+            subject="Alias target",
+            body_text="Please review this.",
+            thread_id="thread-2",
+            message_id="msg-2",
+        )
+
+        self.assertTrue(rule_result.is_to_me)
+        self.assertFalse(rule_result.is_cc_me)
+        self.assertEqual(rule_result.recipient_role, "TO")
+        self.assertEqual(rule_result.rule_category, 1)
+
+    def test_rule_result_treats_group_alias_in_to_as_cc(self) -> None:
+        rule_result = build_rule_result(
+            user_email="user@example.com",
+            known_recipient_addresses=["user@example.com"],
+            cc_only_recipient_addresses=["quality-group@example.com"],
+            sender_email="sender@example.com",
+            to_list=["quality-group@example.com"],
+            cc_list=[],
+            subject="Group alias target",
+            body_text="Please review this with the team.",
+            thread_id="thread-3",
+            message_id="msg-3",
+        )
+
+        self.assertFalse(rule_result.is_to_me)
+        self.assertTrue(rule_result.is_cc_me)
+        self.assertEqual(rule_result.recipient_role, "CC")
+        self.assertEqual(rule_result.rule_category, 2)
 
 
 if __name__ == "__main__":

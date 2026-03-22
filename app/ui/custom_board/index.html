@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8" />
     <meta content="width=device-width, initial-scale=1.0" name="viewport" />
-    <title>HL-MailBot 대시보드</title>
+    <title>HL-Mail Helper 대시보드</title>
     <link href="tailwind.local.css" rel="stylesheet" />
     <style>
         :root {
@@ -172,6 +172,7 @@
 
         .sidebar.collapsed .header-logo-container {
             justify-content: center;
+            align-items: center;
             padding-left: 0.55rem;
             padding-right: 0.55rem;
         }
@@ -182,6 +183,53 @@
 
         .sidebar.collapsed .sidebar-brand-copy {
             display: none;
+        }
+
+        .sidebar-header-toggle-row {
+            display: flex;
+            justify-content: flex-end;
+            width: 100%;
+        }
+
+        .sidebar-brand-mark {
+            width: 2.2rem;
+            height: 2.2rem;
+            border-radius: 0.85rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex: none;
+            overflow: visible;
+        }
+
+        .sidebar-brand-glyph {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem;
+            line-height: 1;
+            font-weight: 800;
+            transform: translateY(-0.02em);
+        }
+
+        .sidebar-header-toggle {
+            flex: none;
+            min-width: 2.5rem;
+            min-height: 2.5rem;
+            align-self: flex-start;
+        }
+
+        .sidebar.collapsed .sidebar-brand-mark {
+            width: 2.35rem;
+            height: 2.35rem;
+        }
+
+        .sidebar.collapsed .sidebar-header-toggle-row {
+            justify-content: center;
+        }
+
+        .sidebar.collapsed .sidebar-header-toggle {
+            align-self: center;
         }
 
         .view-section:not(.active) {
@@ -301,6 +349,10 @@
             background: var(--sidebar-head-bg);
             border-bottom-color: var(--surface-line-soft) !important;
             box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.88);
+            flex-direction: column;
+            align-items: stretch;
+            justify-content: center;
+            gap: 0.75rem;
         }
 
         .nav-item {
@@ -439,8 +491,7 @@
             align-items: stretch;
         }
 
-        .dashboard-thread-panel,
-        .dashboard-task-panel {
+        .dashboard-thread-panel {
             min-height: 0;
             border-color: var(--mui-outline-strong) !important;
             box-shadow: var(--mui-shadow-sm), inset 0 0 0 1px rgba(255, 255, 255, 0.38) !important;
@@ -448,15 +499,7 @@
 
         @media (min-width: 64rem) {
             .dashboard-split {
-                grid-template-columns: minmax(0, 2fr) minmax(20rem, 0.92fr);
-            }
-
-            .dashboard-split.is-detail-mode {
                 grid-template-columns: minmax(0, 1fr);
-            }
-
-            .dashboard-task-panel {
-                min-width: 20rem;
             }
         }
 
@@ -510,6 +553,18 @@
             --mui-primary-dark: #b5684a;
             --mui-primary-soft: rgba(204, 125, 94, 0.06);
             --mui-primary-soft-strong: rgba(204, 125, 94, 0.1);
+            --mui-category-1: #cc7d5e;
+            --mui-category-1-soft: rgba(204, 125, 94, 0.14);
+            --mui-category-1-line: rgba(204, 125, 94, 0.26);
+            --mui-category-1-text: #9f5639;
+            --mui-category-2: #a5622b;
+            --mui-category-2-soft: rgba(165, 98, 43, 0.14);
+            --mui-category-2-line: rgba(165, 98, 43, 0.24);
+            --mui-category-2-text: #8c4f1c;
+            --mui-category-3: #6f7c86;
+            --mui-category-3-soft: rgba(111, 124, 134, 0.14);
+            --mui-category-3-line: rgba(111, 124, 134, 0.22);
+            --mui-category-3-text: #58656f;
             --mui-success-soft: rgba(36, 161, 72, 0.08);
             --mui-bg-top: #fdfcfb;
             /* Warm cream */
@@ -1212,6 +1267,24 @@
             box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.48);
         }
 
+        .dashboard-filter-chip[data-category="category_1"].is-active {
+            border-color: var(--mui-category-1-line);
+            background: linear-gradient(180deg, var(--mui-category-1-soft), rgba(204, 125, 94, 0.06)) !important;
+            color: var(--mui-category-1-text) !important;
+        }
+
+        .dashboard-filter-chip[data-category="category_2"].is-active {
+            border-color: var(--mui-category-2-line);
+            background: linear-gradient(180deg, var(--mui-category-2-soft), rgba(165, 98, 43, 0.05)) !important;
+            color: var(--mui-category-2-text) !important;
+        }
+
+        .dashboard-filter-chip[data-category="category_3"].is-active {
+            border-color: var(--mui-category-3-line);
+            background: linear-gradient(180deg, var(--mui-category-3-soft), rgba(111, 124, 134, 0.05)) !important;
+            color: var(--mui-category-3-text) !important;
+        }
+
         .dashboard-filter-count {
             min-width: 1.65rem;
             padding: 0.16rem 0.4rem;
@@ -1732,6 +1805,35 @@
                 flex-direction: column;
             }
 
+            .dashboard-mail-section-header,
+            .dashboard-mail-detail-toolbar,
+            .dashboard-mail-detail-toolbar-main {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .dashboard-mail-detail-toolbar-leading,
+            .dashboard-mail-card-main {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .dashboard-mail-card-actions,
+            .dashboard-mail-detail-toolbar-actions {
+                justify-content: flex-start;
+            }
+
+            .dashboard-mail-list,
+            .dashboard-mail-detail-view {
+                padding: 0.85rem;
+            }
+
+            .dashboard-mail-card,
+            .dashboard-mail-detail-card,
+            .dashboard-mail-detail-hero {
+                padding: 1rem;
+            }
+
             .dashboard-detail-score-block {
                 text-align: left;
             }
@@ -1782,34 +1884,460 @@
             gap: 1rem;
         }
 
-        #priority-filter-shell {
+        .dashboard-mail-section {
+            display: flex;
+            flex: 1 1 auto;
+            min-height: 0;
+            flex-direction: column;
+        }
+
+        .dashboard-mail-section.hidden {
+            display: none !important;
+        }
+
+        .dashboard-mail-section-header,
+        .dashboard-mail-detail-toolbar {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 0.82rem 1rem !important;
+            border-bottom-color: var(--mui-divider) !important;
+            box-shadow: none;
+            background:
+                radial-gradient(circle at top right, rgba(204, 125, 94, 0.08), rgba(204, 125, 94, 0) 28%),
+                linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(249, 243, 238, 0.97));
+        }
+
+        #priority-thread-panel-header {
+            align-items: center !important;
+        }
+
+        .dashboard-mail-section-copy,
+        .dashboard-mail-detail-toolbar-copy {
+            min-width: 0;
+        }
+
+        #priority-thread-panel-header .panel-title,
+        .dashboard-mail-section-title {
+            display: block;
+            line-height: 1.2;
+        }
+
+        .dashboard-mail-filter-shell {
             display: flex !important;
             align-items: center;
             gap: 0.5rem;
-            padding: 0.75rem 1rem;
+            padding: 0.56rem 0.92rem !important;
             background: var(--mui-panel-strong) !important;
             border-bottom: 1px solid var(--mui-divider);
             box-shadow: none;
         }
 
-        #priority-thread-panel-header,
-        #priority-thread-detail-view>div:first-child {
-            border-bottom-color: var(--mui-divider) !important;
-            box-shadow: none;
+        .dashboard-mail-list,
+        .dashboard-mail-detail-view {
+            background: linear-gradient(180deg, rgba(249, 245, 242, 0.86), rgba(244, 238, 233, 0.62));
         }
 
-        #priority-thread-panel-header {
-            padding: 0.82rem 1rem !important;
-            align-items: center !important;
+        .dashboard-mail-list {
+            padding: 0.82rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.72rem;
         }
 
-        #priority-thread-panel-header .panel-title {
+        .dashboard-mail-card {
+            display: flex;
+            flex: 0 0 auto;
+            flex-direction: column;
+            align-items: stretch;
+            width: 100%;
+            text-align: left;
+            padding: 0.94rem 1rem;
+            border-radius: 22px;
+            border: 1px solid rgba(224, 211, 200, 0.92);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(252, 247, 243, 0.97));
+            box-shadow: 0 12px 28px -24px rgba(42, 28, 15, 0.28), 0 2px 8px rgba(42, 28, 15, 0.04);
+            transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease, background 0.18s ease;
+            position: relative;
+            overflow: hidden;
+            cursor: pointer;
+            outline: none;
+        }
+
+        .dashboard-mail-card::before {
+            content: "";
+            position: absolute;
+            inset: 0 auto 0 0;
+            width: 4px;
+            background: transparent;
+            transition: background 0.18s ease, opacity 0.18s ease;
+            opacity: 0.72;
+        }
+
+        .dashboard-mail-card:hover {
+            border-color: rgba(204, 125, 94, 0.28);
+            box-shadow: 0 18px 32px -24px rgba(42, 28, 15, 0.32), 0 6px 14px rgba(42, 28, 15, 0.06);
+            transform: translateY(-1px);
+        }
+
+        .dashboard-mail-card:focus-visible {
+            border-color: rgba(204, 125, 94, 0.34);
+            box-shadow: 0 0 0 3px rgba(204, 125, 94, 0.14), 0 18px 32px -24px rgba(42, 28, 15, 0.24);
+        }
+
+        .dashboard-mail-card.category-1::before {
+            background: var(--mui-category-1);
+        }
+
+        .dashboard-mail-card.category-2::before {
+            background: var(--mui-category-2);
+        }
+
+        .dashboard-mail-card.category-3::before {
+            background: var(--mui-category-3);
+        }
+
+        .dashboard-mail-card.is-selected {
+            border-color: rgba(204, 125, 94, 0.32);
+            background: linear-gradient(180deg, #fffdfa, #fdf4ee);
+            box-shadow: 0 0 0 2px rgba(204, 125, 94, 0.10), 0 18px 32px -24px rgba(42, 28, 15, 0.30);
+        }
+
+        .dashboard-mail-card.category-1.is-selected {
+            border-color: var(--mui-category-1-line);
+            background: linear-gradient(180deg, rgba(255, 253, 250, 1), rgba(253, 244, 238, 0.98));
+            box-shadow: 0 0 0 2px rgba(204, 125, 94, 0.12), 0 18px 32px -24px rgba(42, 28, 15, 0.30);
+        }
+
+        .dashboard-mail-card.category-2.is-selected {
+            border-color: var(--mui-category-2-line);
+            background: linear-gradient(180deg, rgba(255, 252, 247, 1), rgba(252, 244, 235, 0.98));
+            box-shadow: 0 0 0 2px rgba(165, 98, 43, 0.11), 0 18px 32px -24px rgba(42, 28, 15, 0.28);
+        }
+
+        .dashboard-mail-card.category-3.is-selected {
+            border-color: var(--mui-category-3-line);
+            background: linear-gradient(180deg, rgba(252, 253, 254, 1), rgba(245, 248, 250, 0.98));
+            box-shadow: 0 0 0 2px rgba(111, 124, 134, 0.10), 0 18px 32px -24px rgba(42, 28, 15, 0.24);
+        }
+
+        .dashboard-mail-card-copy {
             display: block;
-            line-height: 1.2;
+            width: 100%;
+            min-width: 0;
         }
 
-        #priority-filter-shell {
-            padding: 0.58rem 0.95rem !important;
+        .dashboard-mail-card-main {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.85rem;
+            width: 100%;
+            min-width: 0;
+        }
+
+        .dashboard-mail-card-actions,
+        .dashboard-mail-detail-toolbar-actions {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 0.45rem;
+            flex: none;
+        }
+
+        .dashboard-mail-action-btn {
+            appearance: none;
+            border: 1px solid var(--mui-outline);
+            border-radius: 999px;
+            padding: 0.42rem 0.82rem;
+            background: linear-gradient(180deg, #ffffff, #fbf4ee);
+            color: var(--mui-text);
+            font-size: 0.76rem;
+            line-height: 1.2;
+            font-weight: 700;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .dashboard-mail-action-btn.is-archive {
+            border-color: rgba(111, 124, 134, 0.26);
+            color: #58656f;
+        }
+
+        .dashboard-mail-action-btn.is-restore {
+            border-color: rgba(59, 130, 246, 0.24);
+            color: #2563eb;
+        }
+
+        .dashboard-mail-action-btn.is-complete {
+            border-color: rgba(46, 125, 50, 0.2);
+            color: #2e7d32;
+        }
+
+        .dashboard-mail-action-btn:hover {
+            border-color: rgba(204, 125, 94, 0.24);
+            background: linear-gradient(180deg, #fffdfa, #f5eae1);
+            color: var(--mui-primary);
+        }
+
+        .dashboard-mail-meta {
+            font-size: 0.76rem;
+            line-height: 1.55;
+            font-weight: 600;
+            color: #7c6b5c;
+        }
+
+        .dashboard-mail-subject {
+            margin-top: 0.42rem;
+            font-size: 0.98rem;
+            line-height: 1.5;
+            font-weight: 800;
+            letter-spacing: -0.015em;
+            color: var(--mui-text);
+            white-space: normal;
+        }
+
+        .dashboard-mail-summary {
+            margin-top: 0.46rem;
+            font-size: 0.88rem;
+            line-height: 1.66;
+            color: #4f4033;
+            display: -webkit-box;
+            -webkit-line-clamp: 4;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            white-space: normal;
+        }
+
+        .dashboard-mail-detail-toolbar {
+            align-items: center;
+        }
+
+        .dashboard-mail-detail-toolbar-main {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 0.85rem;
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        .dashboard-mail-detail-toolbar-leading {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.85rem;
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        .dashboard-mail-detail-toolbar-kicker {
+            font-size: 0.72rem;
+            line-height: 1.3;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--mui-primary);
+        }
+
+        .dashboard-mail-detail-shell.category-1 .dashboard-mail-detail-toolbar-kicker {
+            color: var(--mui-category-1-text);
+        }
+
+        .dashboard-mail-detail-shell.category-2 .dashboard-mail-detail-toolbar-kicker {
+            color: var(--mui-category-2-text);
+        }
+
+        .dashboard-mail-detail-shell.category-3 .dashboard-mail-detail-toolbar-kicker {
+            color: var(--mui-category-3-text);
+        }
+
+        .dashboard-mail-detail-toolbar-title {
+            margin-top: 0.26rem;
+            font-size: 0.96rem;
+            line-height: 1.45;
+            font-weight: 700;
+            color: var(--mui-text);
+        }
+
+        .dashboard-mail-back-button {
+            appearance: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            border-radius: 999px;
+            border: 1px solid var(--mui-outline);
+            background: linear-gradient(180deg, #ffffff, #fbf4ee);
+            color: var(--mui-text);
+            padding: 0.56rem 0.96rem;
+            font-size: 0.82rem;
+            line-height: 1.2;
+            font-weight: 700;
+            cursor: pointer;
+            transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+        }
+
+        .dashboard-mail-back-button:hover {
+            border-color: rgba(204, 125, 94, 0.24);
+            background: linear-gradient(180deg, #fffdfa, #f5eae1);
+            color: var(--mui-primary);
+        }
+
+        .dashboard-mail-detail-view {
+            padding: 1rem;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+
+        .dashboard-mail-detail-shell {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .dashboard-mail-detail-hero {
+            padding: 1.35rem 1.4rem;
+            border-radius: 24px;
+            border: 1px solid rgba(204, 125, 94, 0.15);
+            background:
+                radial-gradient(circle at top right, rgba(204, 125, 94, 0.12), rgba(204, 125, 94, 0) 32%),
+                linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(253, 245, 240, 0.97));
+            box-shadow: 0 14px 30px -24px rgba(42, 28, 15, 0.28), 0 4px 10px rgba(42, 28, 15, 0.04);
+        }
+
+        .dashboard-mail-detail-shell.category-1 .dashboard-mail-detail-hero {
+            border-color: var(--mui-category-1-line);
+            background:
+                radial-gradient(circle at top right, rgba(204, 125, 94, 0.14), rgba(204, 125, 94, 0) 32%),
+                linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(253, 245, 240, 0.97));
+        }
+
+        .dashboard-mail-detail-shell.category-2 .dashboard-mail-detail-hero {
+            border-color: var(--mui-category-2-line);
+            background:
+                radial-gradient(circle at top right, rgba(165, 98, 43, 0.13), rgba(165, 98, 43, 0) 32%),
+                linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(252, 246, 239, 0.97));
+        }
+
+        .dashboard-mail-detail-shell.category-3 .dashboard-mail-detail-hero {
+            border-color: var(--mui-category-3-line);
+            background:
+                radial-gradient(circle at top right, rgba(111, 124, 134, 0.12), rgba(111, 124, 134, 0) 32%),
+                linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(247, 249, 250, 0.97));
+        }
+
+        .dashboard-mail-detail-title {
+            font-size: 1.18rem;
+            line-height: 1.6;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            color: var(--mui-text);
+        }
+
+        .dashboard-mail-detail-meta {
+            margin-top: 0.78rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem 0.75rem;
+            font-size: 0.82rem;
+            line-height: 1.6;
+            color: #7c6b5c;
+        }
+
+        .dashboard-mail-detail-due {
+            margin-top: 0.82rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.42rem 0.72rem;
+            border-radius: 999px;
+            background: rgba(204, 125, 94, 0.10);
+            border: 1px solid rgba(204, 125, 94, 0.16);
+            color: #9a5a40;
+            font-size: 0.76rem;
+            line-height: 1.3;
+            font-weight: 700;
+        }
+
+        .dashboard-mail-detail-card {
+            padding: 1.12rem 1.2rem;
+            border-radius: 22px;
+            border: 1px solid rgba(224, 211, 200, 0.92);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(252, 247, 243, 0.96));
+            box-shadow: 0 10px 24px -22px rgba(42, 28, 15, 0.24), 0 2px 8px rgba(42, 28, 15, 0.04);
+        }
+
+        .dashboard-mail-detail-card-title {
+            font-size: 0.74rem;
+            line-height: 1.35;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--mui-text-subtle);
+        }
+
+        .dashboard-mail-detail-body {
+            margin-top: 0.72rem;
+            font-size: 0.94rem;
+            line-height: 1.82;
+            color: #423328;
+        }
+
+        .dashboard-mail-detail-list {
+            margin-top: 0.9rem;
+            display: grid;
+            gap: 0.78rem;
+        }
+
+        .dashboard-mail-detail-item {
+            display: flex;
+            gap: 0.82rem;
+            align-items: flex-start;
+            padding: 0.92rem 0.98rem;
+            border-radius: 18px;
+            border: 1px solid rgba(224, 211, 200, 0.88);
+            background: rgba(250, 245, 241, 0.88);
+        }
+
+        .dashboard-mail-detail-item-index {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 1.9rem;
+            height: 1.9rem;
+            flex-shrink: 0;
+            border-radius: 999px;
+            border: 1px solid var(--mui-outline);
+            background: rgba(255, 255, 255, 0.95);
+            color: #7c6b5c;
+            font-size: 0.76rem;
+            font-weight: 700;
+        }
+
+        .dashboard-mail-detail-item-text {
+            margin: 0;
+            font-size: 0.92rem;
+            line-height: 1.75;
+            color: #4a3a2c;
+        }
+
+        .dashboard-mail-detail-attachments {
+            margin-top: 0.9rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .dashboard-mail-detail-attachment {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.5rem 0.8rem;
+            border-radius: 999px;
+            border: 1px solid var(--mui-outline);
+            background: rgba(250, 245, 241, 0.92);
+            color: #6b5a4c;
+            font-size: 0.78rem;
+            line-height: 1.35;
+            font-weight: 700;
         }
 
         #thread-detail-badge {
@@ -2393,6 +2921,18 @@
             --mui-text: #f0e6dc;
             --mui-text-muted: #b8a898;
             --mui-text-subtle: #a08c7c;
+            --mui-category-1: #da9272;
+            --mui-category-1-soft: rgba(218, 146, 114, 0.18);
+            --mui-category-1-line: rgba(218, 146, 114, 0.32);
+            --mui-category-1-text: #ffcfb8;
+            --mui-category-2: #d4a05e;
+            --mui-category-2-soft: rgba(212, 160, 94, 0.18);
+            --mui-category-2-line: rgba(212, 160, 94, 0.30);
+            --mui-category-2-text: #ffd9a8;
+            --mui-category-3: #9eb0bc;
+            --mui-category-3-soft: rgba(158, 176, 188, 0.18);
+            --mui-category-3-line: rgba(158, 176, 188, 0.28);
+            --mui-category-3-text: #dbe8ef;
             --mui-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.28), 0 10px 22px -18px rgba(0, 0, 0, 0.46);
             --mui-shadow-sm: 0 14px 28px -22px rgba(0, 0, 0, 0.44), 0 8px 20px rgba(0, 0, 0, 0.18);
             --mui-shadow-md: 0 24px 44px -26px rgba(0, 0, 0, 0.48), 0 14px 28px rgba(0, 0, 0, 0.22);
@@ -2529,8 +3069,7 @@
             box-shadow: var(--mui-shadow-xs) !important;
         }
 
-        html.dark #priority-thread-panel,
-        html.dark #dashboard-task-panel {
+        html.dark #priority-thread-panel {
             border-color: var(--mui-outline) !important;
             box-shadow: var(--mui-shadow-xs) !important;
         }
@@ -2651,6 +3190,24 @@
             border-color: rgba(218, 146, 114, 0.24) !important;
             color: #fde8da !important;
             box-shadow: inset 0 0 0 1px rgba(253, 232, 218, 0.08) !important;
+        }
+
+        html.dark .dashboard-filter-chip[data-category="category_1"].is-active {
+            background: linear-gradient(180deg, rgba(218, 146, 114, 0.22), rgba(218, 146, 114, 0.1)) !important;
+            border-color: var(--mui-category-1-line) !important;
+            color: var(--mui-category-1-text) !important;
+        }
+
+        html.dark .dashboard-filter-chip[data-category="category_2"].is-active {
+            background: linear-gradient(180deg, rgba(212, 160, 94, 0.22), rgba(212, 160, 94, 0.1)) !important;
+            border-color: var(--mui-category-2-line) !important;
+            color: var(--mui-category-2-text) !important;
+        }
+
+        html.dark .dashboard-filter-chip[data-category="category_3"].is-active {
+            background: linear-gradient(180deg, rgba(158, 176, 188, 0.22), rgba(158, 176, 188, 0.08)) !important;
+            border-color: var(--mui-category-3-line) !important;
+            color: var(--mui-category-3-text) !important;
         }
 
         html.dark .dashboard-filter-count {
@@ -2814,16 +3371,167 @@
             color: #a08c7c;
         }
 
-        html.dark #priority-filter-shell {
+        html.dark .dashboard-mail-filter-shell {
             background: rgba(14, 11, 8, 0.82) !important;
             border-bottom-color: var(--mui-divider) !important;
             box-shadow: none;
         }
 
-        html.dark #priority-thread-panel-header,
-        html.dark #priority-thread-detail-view>div:first-child {
+        html.dark .dashboard-mail-section-header,
+        html.dark .dashboard-mail-detail-toolbar {
             border-bottom-color: var(--mui-divider) !important;
             box-shadow: none;
+            background:
+                radial-gradient(circle at top right, rgba(218, 146, 114, 0.12), rgba(218, 146, 114, 0) 34%),
+                linear-gradient(180deg, rgba(24, 20, 17, 0.97), rgba(18, 15, 12, 0.95));
+        }
+
+        html.dark .dashboard-mail-list,
+        html.dark .dashboard-mail-detail-view {
+            background: linear-gradient(180deg, rgba(17, 14, 11, 0.92), rgba(13, 11, 9, 0.96));
+        }
+
+        html.dark .dashboard-mail-card,
+        html.dark .dashboard-mail-detail-card,
+        html.dark .dashboard-mail-detail-hero,
+        html.dark .dashboard-mail-detail-item {
+            background: linear-gradient(180deg, rgba(20, 17, 14, 0.96), rgba(18, 15, 12, 0.98)) !important;
+            border-color: var(--mui-outline) !important;
+            box-shadow: var(--mui-shadow-xs) !important;
+        }
+
+        html.dark .dashboard-mail-card:hover {
+            border-color: rgba(218, 146, 114, 0.28);
+        }
+
+        html.dark .dashboard-mail-card.category-1:hover {
+            border-color: var(--mui-category-1-line);
+        }
+
+        html.dark .dashboard-mail-card.category-2:hover {
+            border-color: var(--mui-category-2-line);
+        }
+
+        html.dark .dashboard-mail-card.category-3:hover {
+            border-color: var(--mui-category-3-line);
+        }
+
+        html.dark .dashboard-mail-card.is-selected {
+            background: linear-gradient(180deg, rgba(218, 146, 114, 0.16), rgba(26, 21, 18, 0.98)) !important;
+            border-color: rgba(218, 146, 114, 0.34) !important;
+            box-shadow: 0 0 0 2px rgba(218, 146, 114, 0.12), var(--mui-shadow-sm) !important;
+        }
+
+        html.dark .dashboard-mail-card.category-1.is-selected {
+            background: linear-gradient(180deg, rgba(218, 146, 114, 0.18), rgba(26, 21, 18, 0.98)) !important;
+            border-color: var(--mui-category-1-line) !important;
+            box-shadow: 0 0 0 2px rgba(218, 146, 114, 0.14), var(--mui-shadow-sm) !important;
+        }
+
+        html.dark .dashboard-mail-card.category-2.is-selected {
+            background: linear-gradient(180deg, rgba(212, 160, 94, 0.18), rgba(26, 21, 18, 0.98)) !important;
+            border-color: var(--mui-category-2-line) !important;
+            box-shadow: 0 0 0 2px rgba(212, 160, 94, 0.14), var(--mui-shadow-sm) !important;
+        }
+
+        html.dark .dashboard-mail-card.category-3.is-selected {
+            background: linear-gradient(180deg, rgba(158, 176, 188, 0.16), rgba(26, 21, 18, 0.98)) !important;
+            border-color: var(--mui-category-3-line) !important;
+            box-shadow: 0 0 0 2px rgba(158, 176, 188, 0.12), var(--mui-shadow-sm) !important;
+        }
+
+        html.dark .dashboard-mail-section-note,
+        html.dark .dashboard-mail-meta,
+        html.dark .dashboard-mail-detail-meta,
+        html.dark .dashboard-mail-detail-card-title {
+            color: #c4b3a5;
+        }
+
+        html.dark .dashboard-mail-summary,
+        html.dark .dashboard-mail-detail-body,
+        html.dark .dashboard-mail-detail-item-text {
+            color: #e8ddd0;
+        }
+
+        html.dark .dashboard-mail-subject,
+        html.dark .dashboard-mail-detail-title,
+        html.dark .dashboard-mail-detail-toolbar-title {
+            color: #fff5ee;
+        }
+
+        html.dark .dashboard-mail-detail-toolbar-kicker {
+            color: #ffcfb8;
+        }
+
+        html.dark .dashboard-mail-detail-shell.category-2 .dashboard-mail-detail-toolbar-kicker {
+            color: var(--mui-category-2-text);
+        }
+
+        html.dark .dashboard-mail-detail-shell.category-3 .dashboard-mail-detail-toolbar-kicker {
+            color: var(--mui-category-3-text);
+        }
+
+        html.dark .dashboard-mail-back-button {
+            background: rgba(20, 17, 14, 0.92);
+            border-color: var(--mui-outline) !important;
+            color: #fde8da;
+        }
+
+        html.dark .dashboard-mail-back-button:hover {
+            background: rgba(28, 23, 19, 0.98);
+            border-color: rgba(218, 146, 114, 0.26) !important;
+            color: #fff5ee;
+        }
+
+        html.dark .dashboard-mail-action-btn {
+            background: rgba(20, 17, 14, 0.92);
+            border-color: var(--mui-outline) !important;
+            color: #fde8da;
+        }
+
+        html.dark .dashboard-mail-action-btn.is-archive {
+            color: #c9d0d5;
+        }
+
+        html.dark .dashboard-mail-action-btn.is-restore {
+            color: #93c5fd;
+        }
+
+        html.dark .dashboard-mail-action-btn.is-complete {
+            color: #a6dfb7;
+        }
+
+        html.dark .dashboard-mail-action-btn:hover {
+            background: rgba(28, 23, 19, 0.98);
+            border-color: rgba(218, 146, 114, 0.26) !important;
+            color: #fff5ee;
+        }
+
+        html.dark .dashboard-mail-detail-due {
+            background: rgba(218, 146, 114, 0.14);
+            border-color: rgba(218, 146, 114, 0.22);
+            color: #ffcfb8;
+        }
+
+        html.dark .dashboard-mail-detail-shell.category-2 .dashboard-mail-detail-hero {
+            border-color: var(--mui-category-2-line) !important;
+            background:
+                radial-gradient(circle at top right, rgba(212, 160, 94, 0.2), rgba(212, 160, 94, 0) 32%),
+                linear-gradient(180deg, rgba(26, 21, 18, 0.98), rgba(20, 17, 14, 0.96)) !important;
+        }
+
+        html.dark .dashboard-mail-detail-shell.category-3 .dashboard-mail-detail-hero {
+            border-color: var(--mui-category-3-line) !important;
+            background:
+                radial-gradient(circle at top right, rgba(158, 176, 188, 0.18), rgba(158, 176, 188, 0) 32%),
+                linear-gradient(180deg, rgba(26, 21, 18, 0.98), rgba(20, 17, 14, 0.96)) !important;
+        }
+
+        html.dark .dashboard-mail-detail-attachment,
+        html.dark .dashboard-mail-detail-item-index {
+            background: rgba(20, 17, 14, 0.90);
+            border-color: var(--mui-outline);
+            color: #e0cbbd;
         }
 
         html.dark #priority-filter-container button,
@@ -2968,32 +3676,46 @@
         <aside id="sidebar"
             class="app-sidebar sidebar w-64 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col shrink-0 z-20 shadow-sm relative">
             <div
-                class="header-logo-container h-16 w-full px-4 flex items-center gap-3 border-b border-slate-200 dark:border-slate-800 shrink-0 overflow-hidden">
-                <div class="sidebar-brand-main flex flex-1 min-w-0 items-center gap-3">
+                class="header-logo-container w-full px-4 py-4 flex border-b border-slate-200 dark:border-slate-800 shrink-0 overflow-hidden">
+                <div class="sidebar-brand-main flex w-full min-w-0 items-center gap-3">
                     <div
-                        class="bg-primary min-w-[32px] w-8 h-8 rounded-lg flex items-center justify-center text-white shrink-0 shadow-sm">
-                        <span class="material-symbols-outlined text-lg">M</span>
+                        class="sidebar-brand-mark bg-primary text-white shrink-0 shadow-sm">
+                        <span class="sidebar-brand-glyph" aria-hidden="true">M</span>
                     </div>
                     <div class="sidebar-brand-copy sidebar-text flex-1 min-w-0">
-                        <h1 class="font-bold text-slate-900 dark:text-white leading-tight truncate">HL-KMail Bot</h1>
+                        <h1 class="font-bold text-slate-900 dark:text-white leading-tight truncate">HL-Mail Helper</h1>
                         <p class="text-[10px] text-slate-500 dark:text-slate-400 truncate">Rev.0</p>
                     </div>
                 </div>
-                <button onclick="toggleSidebar()"
-                    class="sidebar-header-toggle w-10 h-10 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 flex items-center justify-center transition-colors focus:outline-none shrink-0"
-                    title="사이드바 접기 또는 펼치기" type="button">
-                    <span class="material-symbols-outlined text-xl transition-transform duration-300" id="sidebar-icon">
-                        &lt;
-                    </span>
-                </button>
+                <div class="sidebar-header-toggle-row">
+                    <button onclick="toggleSidebar()"
+                        class="sidebar-header-toggle w-10 h-10 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 flex items-center justify-center transition-colors focus:outline-none shrink-0"
+                        title="사이드바 접기 또는 펼치기" type="button">
+                        <span class="material-symbols-outlined text-xl transition-transform duration-300" id="sidebar-icon">
+                            &lt;
+                        </span>
+                    </button>
+                </div>
             </div>
 
             <nav class="flex-1 py-6 px-3 space-y-2 overflow-y-auto overflow-x-hidden" id="nav-links">
-                <button type="button" onclick="navigate('메일 정리')" data-page="메일 정리" aria-label="메일 정리"
+                <button type="button" onclick="navigate('메일 정리')" data-page="메일 정리" aria-label="메일 분류"
                     class="nav-item w-full bg-transparent border-0 text-left cursor-pointer flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300">
                     <span class="material-symbols-outlined shrink-0">@</span>
-                    <span class="sidebar-text">대시보드</span>
-                    <div class="sidebar-tooltip bg-slate-800 text-white text-xs px-2 py-1 rounded shadow-lg">대시보드</div>
+                    <span class="sidebar-text">메일 분류</span>
+                    <div class="sidebar-tooltip bg-slate-800 text-white text-xs px-2 py-1 rounded shadow-lg">메일 분류</div>
+                </button>
+                <button type="button" onclick="navigate('보관함')" data-page="보관함" aria-label="보관함"
+                    class="nav-item w-full bg-transparent border-0 text-left cursor-pointer flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300">
+                    <span class="material-symbols-outlined shrink-0">A</span>
+                    <span class="sidebar-text">보관함</span>
+                    <div class="sidebar-tooltip bg-slate-800 text-white text-xs px-2 py-1 rounded shadow-lg">보관함</div>
+                </button>
+                <button type="button" onclick="navigate('완료')" data-page="완료" aria-label="완료"
+                    class="nav-item w-full bg-transparent border-0 text-left cursor-pointer flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300">
+                    <span class="material-symbols-outlined shrink-0">C</span>
+                    <span class="sidebar-text">완료</span>
+                    <div class="sidebar-tooltip bg-slate-800 text-white text-xs px-2 py-1 rounded shadow-lg">완료</div>
                 </button>
                 <button type="button" onclick="navigate('메일 자동발송')" data-page="메일 자동발송" aria-label="메일 자동발송"
                     class="nav-item w-full bg-transparent border-0 text-left cursor-pointer flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300">
@@ -3042,7 +3764,7 @@
             <header
                 class="app-toolbar h-16 shrink-0 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 md:px-6 flex items-center justify-between shadow-sm z-10 w-full relative">
                 <div class="flex items-center gap-4">
-                    <h2 class="text-lg font-bold" id="header-title">메일 요약</h2>
+                    <h2 class="text-lg font-bold" id="header-title">메일 분류</h2>
                 </div>
                 <div class="toolbar-actions">
                     <div aria-label="화면 모드" class="theme-toggle-group" role="group">
@@ -3069,9 +3791,9 @@
                     <div
                         class="view-heading flex flex-col md:flex-row justify-between items-start md:items-start gap-4 shrink-0">
                         <div class="dashboard-heading-copy">
-                            <h3 class="view-title text-2xl md:text-3xl font-extrabold tracking-tight">메일 브리프</h3>
-                            <p class="view-subtitle text-sm md:text-base text-slate-500 dark:text-slate-400 mt-1">AI가 중요
-                                메일과 후속 조치까지 한 번에 정리해주는 작업 화면입니다.</p>
+                            <h3 class="view-title text-2xl md:text-3xl font-extrabold tracking-tight" id="dashboard-view-title">메일 분류</h3>
+                            <p class="view-subtitle text-sm md:text-base text-slate-500 dark:text-slate-400 mt-1" id="dashboard-view-subtitle">수신 메일을
+                                내가 할 일, 검토 필요, 참고용으로 자동 분류하고 클릭 시 핵심 요약 화면으로 전환해 확인할 수 있습니다.</p>
                             <div class="dashboard-sync-strip shrink-0" id="dashboard-sync-status-grid">
                                 <div class="dashboard-sync-pill">
                                     <span class="dashboard-sync-pill-accent" aria-hidden="true"></span>
@@ -3092,66 +3814,47 @@
                     <div class="dashboard-split grid grid-cols-1 gap-4 md:gap-6 flex-1 min-h-0 overflow-hidden" id="dashboard-split-shell">
                         <div
                             class="dashboard-thread-panel flex flex-col bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm h-full relative min-w-0" id="priority-thread-panel">
-                            <div
-                                class="bg-slate-50 border-b border-slate-200 px-6 py-4 flex justify-between items-start gap-3 shrink-0 w-full" id="priority-thread-panel-header">
-                                <div>
-                                    <span class="panel-title font-bold text-slate-800">우선순위 스레드</span>
+                            <div class="dashboard-mail-section" id="priority-thread-list-section">
+                                <div class="dashboard-mail-section-header shrink-0 w-full" id="priority-thread-panel-header">
+                                    <div class="dashboard-mail-section-copy">
+                                        <span class="dashboard-mail-section-title panel-title font-bold text-slate-800" id="priority-list-title">메일 분류 목록</span>
+                                    </div>
+                                    <span
+                                        class="text-xs font-semibold text-slate-500 bg-white border border-slate-200 px-2.5 py-1 rounded-full"
+                                        id="priority-count-text">0개 메일</span>
                                 </div>
-                                <span
-                                    class="text-xs font-semibold text-slate-500 bg-white border border-slate-200 px-2.5 py-1 rounded-full"
-                                    id="priority-count-text">0개 스레드</span>
-                            </div>
-                            <div class="px-4 py-3 border-b border-slate-100 bg-white shrink-0"
-                                id="priority-filter-shell">
-                                <div class="flex flex-wrap gap-2" id="priority-filter-container">
-                                    <span class="text-xs text-slate-400">불러오는 중...</span>
-                                </div>
-                            </div>
-                            <div class="flex flex-1 min-h-0 flex-col" id="priority-thread-list-view">
-                                <div class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden w-full p-4 space-y-3 bg-slate-50/60"
-                                    id="priority-thread-list">
-                                    <div class="text-center text-slate-400 py-16">불러오는 중...</div>
-                                </div>
-                                <div class="shrink-0 border-t border-slate-100 bg-white px-4 py-3" id="priority-pagination-shell">
-                                    <div class="flex flex-wrap items-center justify-center gap-2" id="priority-pagination">
+                                <div class="dashboard-mail-filter-shell shrink-0" id="priority-filter-shell">
+                                    <div class="flex flex-wrap gap-2" id="priority-filter-container">
                                         <span class="text-xs text-slate-400">불러오는 중...</span>
                                     </div>
                                 </div>
-                            </div>
-                        </div>
-
-                        <div
-                            class="dashboard-task-panel flex flex-col bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm h-full relative min-w-0" id="dashboard-task-panel">
-                            <div
-                                class="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50 shrink-0 w-full">
-                                <h4 class="panel-title font-bold text-slate-800">내 액션 보드</h4>
-                            </div>
-                            <div class="px-4 py-3 border-b border-slate-100 bg-white flex items-center gap-2 shrink-0">
-                                <button id="task-tab-open" onclick="switchTaskTab('open')"
-                                    class="dashboard-tab-btn is-active">
-                                    진행
-                                    <span id="task-tab-open-count"
-                                        class="bg-white/80 px-1.5 py-0.5 rounded-full">0</span>
-                                </button>
-                                <button id="task-tab-completed" onclick="switchTaskTab('completed')"
-                                    class="dashboard-tab-btn">
-                                    완료
-                                    <span id="task-tab-completed-count"
-                                        class="bg-white px-1.5 py-0.5 rounded-full">0</span>
-                                </button>
-                            </div>
-                            <div class="flex-1 min-h-0">
-                                <div class="h-full overflow-y-auto overflow-x-hidden w-full p-6 space-y-4"
-                                    id="task-container">
-                                    <div
-                                        class="text-center text-slate-400 py-12 flex flex-col items-center justify-center gap-2 h-full">
-                                        불러오는 중...</div>
+                                <div class="flex flex-1 min-h-0 flex-col" id="priority-thread-list-view">
+                                    <div class="dashboard-mail-list flex-1 min-h-0 overflow-y-auto overflow-x-hidden w-full"
+                                        id="priority-thread-list">
+                                        <div class="text-center text-slate-400 py-16">불러오는 중...</div>
+                                    </div>
+                                    <div class="hidden shrink-0 border-t border-slate-100 bg-white px-4 py-3" id="priority-pagination-shell">
+                                        <div class="flex flex-wrap items-center justify-center gap-2" id="priority-pagination"></div>
+                                    </div>
                                 </div>
-                                <div class="hidden h-full overflow-y-auto overflow-x-hidden w-full p-6 space-y-4"
-                                    id="completed-task-container">
-                                    <div
-                                        class="text-center text-slate-400 py-12 flex flex-col items-center justify-center gap-2 h-full">
-                                        불러오는 중...</div>
+                            </div>
+                            <div class="dashboard-mail-section hidden" id="priority-thread-detail-section">
+                                <div class="dashboard-mail-detail-toolbar shrink-0" id="priority-thread-detail-header">
+                                    <div class="dashboard-mail-detail-toolbar-main" id="priority-thread-detail-toolbar">
+                                        <button type="button" class="dashboard-mail-back-button" onclick="window.showDashboardMailList()">
+                                            <span aria-hidden="true">←</span>
+                                            <span>뒤로가기</span>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="dashboard-mail-detail-view flex-1 min-h-0 w-full"
+                                    id="priority-thread-detail-view">
+                                    <div id="dashboard-mail-summary-container"
+                                        class="h-full w-full">
+                                        <div
+                                            class="text-center text-slate-400 py-12 flex flex-col items-center justify-center gap-2 h-full">
+                                            불러오는 중...</div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -3338,7 +4041,7 @@
                         <section class="help-panel help-panel-primary">
                             <p class="help-kicker">빠른 시작</p>
                             <h4 class="help-panel-title">처음 사용할 때의 기본 흐름</h4>
-                            <p class="help-panel-text">설정을 저장한 뒤 메일을 동기화하고, 중요 스레드와 내 액션을 확인하면 기본 사용은 끝납니다.</p>
+                            <p class="help-panel-text">설정을 저장한 뒤 메일을 동기화하고, 분류된 메일 탭과 요약 화면을 확인하면 기본 사용은 끝납니다.</p>
                             <div class="help-step-list">
                                 <div class="help-step-item">
                                     <span class="help-step-number">1</span>
@@ -3357,8 +4060,8 @@
                                 <div class="help-step-item">
                                     <span class="help-step-number">3</span>
                                     <div>
-                                        <p class="help-step-title">중요 메일 확인</p>
-                                        <p class="help-step-text">AI가 정리한 요약과 내 액션 항목을 확인합니다.</p>
+                                        <p class="help-step-title">분류 메일 확인</p>
+                                        <p class="help-step-text">AI가 분류한 메일 목록에서 탭별 메일과 핵심 요약을 확인합니다.</p>
                                     </div>
                                 </div>
                                 <div class="help-step-item">
@@ -3391,11 +4094,11 @@
                             <section class="help-panel help-panel-compact">
                                 <p class="help-kicker">핵심 기능</p>
                                 <h4 class="help-panel-title">자주 쓰는 화면 구성</h4>
-                                <p class="help-panel-text">메일 브리프에서 우선순위를 보고, 자동발송과 로그/설정으로 이어지는 기본 동선을 빠르게 파악할 수 있습니다.</p>
+                                <p class="help-panel-text">메일 분류 화면에서 해야 할 일과 검토 메일을 확인하고, 자동발송과 로그/설정으로 이어지는 기본 동선을 빠르게 파악할 수 있습니다.</p>
                                 <div class="help-feature-list">
                                     <div class="help-feature-item">
                                         <p class="help-feature-name">대시보드</p>
-                                        <p class="help-feature-value">중요 메일, 현재 결론, 일정, 내 액션을 한 화면에서 확인합니다.</p>
+                                        <p class="help-feature-value">3개 분류 탭에서 메일을 고르고, 전환형 요약 화면으로 핵심 내용을 빠르게 확인합니다.</p>
                                     </div>
                                     <div class="help-feature-item">
                                         <p class="help-feature-name">자동발송</p>

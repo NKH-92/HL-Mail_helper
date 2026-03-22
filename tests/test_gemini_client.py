@@ -36,6 +36,7 @@ class GeminiClientTests(unittest.TestCase):
         self.assertNotIn("responseMimeType", payload["generationConfig"])
         self.assertNotIn("responseJsonSchema", payload["generationConfig"])
         self.assertIn("Return exactly one JSON object.", payload["contents"][0]["parts"][0]["text"])
+        self.assertEqual(payload["generationConfig"]["topP"], 0.95)
 
     def test_gemini_payload_keeps_structured_output(self) -> None:
         payload = self.client._build_payload(
@@ -48,6 +49,7 @@ class GeminiClientTests(unittest.TestCase):
         self.assertIn("systemInstruction", payload)
         self.assertEqual(payload["generationConfig"]["responseMimeType"], "application/json")
         self.assertEqual(payload["generationConfig"]["responseJsonSchema"], {"type": "object"})
+        self.assertEqual(payload["generationConfig"]["topP"], 0.95)
 
     def test_new_gemini_preview_model_keeps_structured_output(self) -> None:
         payload = self.client._build_payload(
@@ -60,6 +62,7 @@ class GeminiClientTests(unittest.TestCase):
         self.assertIn("systemInstruction", payload)
         self.assertEqual(payload["generationConfig"]["responseMimeType"], "application/json")
         self.assertEqual(payload["generationConfig"]["responseJsonSchema"], {"type": "object"})
+        self.assertEqual(payload["generationConfig"]["topP"], 0.95)
 
     def test_hanlim_provider_uses_openai_base_url(self) -> None:
         config = AppConfig(
@@ -110,6 +113,8 @@ class GeminiClientTests(unittest.TestCase):
         _, kwargs = openai_instance.chat.completions.create.call_args
         self.assertEqual(kwargs["model"], "hanlimAI")
         self.assertEqual(kwargs["messages"][1], {"role": "user", "content": "user"})
+        self.assertEqual(kwargs["temperature"], 0.1)
+        self.assertEqual(kwargs["top_p"], 0.95)
         self.assertEqual(kwargs["timeout"], 60)
         self.assertIn("Return exactly one JSON object matching this JSON schema.", kwargs["messages"][0]["content"])
 

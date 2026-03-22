@@ -30,10 +30,12 @@ def _parsed_mail(
         to_list=["user@example.com"],
         cc_list=[],
         received_at=received_at,
+        body_text=f"{subject} full body",
         raw_preview=f"{subject} body",
         in_reply_to=in_reply_to,
         references=references or [],
         attachment_names=[],
+        attachment_paths=[],
     )
 
 
@@ -47,6 +49,8 @@ def _analysis_result(
     action_classification: str = "ACTION_SELF",
     action_owner: str = "me",
     action_type: list[str] | None = None,
+    mail_action_items: list[str] | None = None,
+    my_action_items: list[str] | None = None,
     suggested_task_title: str | None = None,
     confidence: float = 0.9,
 ) -> dict[str, object]:
@@ -56,10 +60,10 @@ def _analysis_result(
         "classification": action_classification,
         "one_line_summary": summary,
         "summary_3lines": [summary],
-        "mail_action_items": [],
+        "mail_action_items": mail_action_items or [],
         "my_action_required": my_action_status != "reference_only",
         "my_action_status": my_action_status,
-        "my_action_items": [],
+        "my_action_items": my_action_items or [],
         "action_owner": action_owner,
         "action_type": action_type or ["none"],
         "due_date": due_date,
@@ -94,6 +98,34 @@ class RepositoryAnalysisTargetTests(unittest.TestCase):
 
             self.assertEqual([mail.message_id for mail in pending_only], ["pending-1"])
             self.assertEqual([mail.message_id for mail in with_failed], ["pending-1", "failed-1"])
+            del repository
+            del database
+            gc.collect()
+
+    def test_list_analysis_targets_reserves_room_for_failed_retries(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = DatabaseManager(Path(temp_dir) / "app.db")
+            repository = MailRepository(database)
+
+            for index in range(3):
+                repository.create_from_parsed_mail(
+                    _parsed_mail(
+                        f"pending-{index}",
+                        f"Pending {index}",
+                        datetime(2026, 3, 8, 9, 0, 0) - timedelta(minutes=index),
+                    )
+                )
+            failed_id = repository.create_from_parsed_mail(
+                _parsed_mail("failed-retry", "Failed retry", datetime(2026, 3, 8, 8, 0, 0))
+            )
+
+            self.assertIsNotNone(failed_id)
+            repository.mark_analysis_failed(int(failed_id), "temporary error")
+
+            targets = repository.list_analysis_targets(limit=3, include_failed=True)
+
+            self.assertEqual([mail.message_id for mail in targets[:2]], ["pending-0", "pending-1"])
+            self.assertEqual(targets[-1].message_id, "failed-retry")
             del repository
             del database
             gc.collect()
@@ -186,6 +218,39 @@ class RepositoryAnalysisTargetTests(unittest.TestCase):
             del database
             gc.collect()
 
+    def test_build_thread_summary_keeps_head_and_tail_of_previous_mail(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = DatabaseManager(Path(temp_dir) / "app.db")
+            repository = MailRepository(database)
+
+            root = _parsed_mail("root-1", "Root", datetime(2026, 3, 8, 9, 0, 0))
+            root.body_text = f"{'HEAD ' * 60}{'middle ' * 200}{'TAIL ' * 60}"
+            root.raw_preview = root.body_text[:4000]
+            root_id = repository.create_from_parsed_mail(root)
+
+            reply = _parsed_mail(
+                "reply-1",
+                "Re: Root",
+                datetime(2026, 3, 8, 10, 0, 0),
+                in_reply_to="root-1",
+                references=["root-1"],
+            )
+            reply.body_text = "Short follow-up"
+            reply.raw_preview = reply.body_text
+            reply_id = repository.create_from_parsed_mail(reply)
+
+            self.assertIsNotNone(root_id)
+            self.assertIsNotNone(reply_id)
+
+            summary = repository.build_thread_summary(int(reply_id))
+
+            self.assertIn("Previous message 1", summary)
+            self.assertIn("HEAD HEAD", summary)
+            self.assertIn("TAIL TAIL", summary)
+            del repository
+            del database
+            gc.collect()
+
     def test_thread_overview_cache_preserves_concurrent_invalidations_during_rebuild(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             database = DatabaseManager(Path(temp_dir) / "app.db")
@@ -216,6 +281,94 @@ class RepositoryAnalysisTargetTests(unittest.TestCase):
             self.assertEqual(refreshed_threads[0].latest_mail_status, "todo")
             del raced_threads
             del refreshed_threads
+            del repository
+            del database
+            gc.collect()
+
+    def test_move_mail_retention_bucket_to_completed_marks_mail_done_and_closes_my_actions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = DatabaseManager(Path(temp_dir) / "app.db")
+            repository = MailRepository(database)
+
+            mail_id = repository.create_from_parsed_mail(
+                _parsed_mail("complete-1", "Complete me", datetime(2026, 3, 8, 9, 0, 0))
+            )
+
+            self.assertIsNotNone(mail_id)
+            analysis_result = _analysis_result(
+                summary="Send the follow-up",
+                action_type=["reply"],
+                mail_action_items=["Track the reply"],
+                my_action_items=["Send the follow-up"],
+            )
+            repository.save_analysis_bundle(
+                int(mail_id),
+                analysis_result,
+                mail_action_items=list(analysis_result["mail_action_items"]),
+                my_action_items=list(analysis_result["my_action_items"]),
+                due_date=None,
+                current_user_email="user@example.com",
+            )
+
+            moved_mail = repository.move_mail_retention_bucket(int(mail_id), "completed")
+            open_tasks = repository.list_open_my_action_items()
+            completed_tasks = repository.list_completed_my_action_items()
+
+            self.assertIsNotNone(moved_mail)
+            self.assertEqual(moved_mail.status, "done")
+            self.assertEqual(moved_mail.retention_bucket, "completed")
+            self.assertEqual(repository.count_open_action_items(int(mail_id), "my"), 0)
+            self.assertEqual(len(open_tasks), 0)
+            self.assertEqual(len(completed_tasks), 1)
+            self.assertEqual(completed_tasks[0].mail_id, int(mail_id))
+            self.assertIsNotNone(completed_tasks[0].completed_at)
+            del open_tasks
+            del completed_tasks
+            del repository
+            del database
+            gc.collect()
+
+    def test_move_mail_retention_bucket_restore_reopens_mail_and_my_actions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = DatabaseManager(Path(temp_dir) / "app.db")
+            repository = MailRepository(database)
+
+            mail_id = repository.create_from_parsed_mail(
+                _parsed_mail("restore-1", "Restore me", datetime(2026, 3, 8, 9, 0, 0))
+            )
+
+            self.assertIsNotNone(mail_id)
+            analysis_result = _analysis_result(
+                summary="Reply to the sender",
+                action_type=["reply"],
+                mail_action_items=["Track the response"],
+                my_action_items=["Reply to the sender"],
+            )
+            repository.save_analysis_bundle(
+                int(mail_id),
+                analysis_result,
+                mail_action_items=list(analysis_result["mail_action_items"]),
+                my_action_items=list(analysis_result["my_action_items"]),
+                due_date=None,
+                current_user_email="user@example.com",
+            )
+
+            repository.move_mail_retention_bucket(int(mail_id), "completed")
+            restored_mail = repository.move_mail_retention_bucket(int(mail_id), "classified")
+            open_tasks = repository.list_open_my_action_items()
+            completed_tasks = repository.list_completed_my_action_items()
+
+            self.assertIsNotNone(restored_mail)
+            self.assertEqual(restored_mail.status, "todo")
+            self.assertEqual(restored_mail.retention_bucket, "classified")
+            self.assertEqual(repository.count_open_action_items(int(mail_id), "my"), 1)
+            self.assertEqual(len(open_tasks), 1)
+            self.assertEqual(open_tasks[0].mail_id, int(mail_id))
+            self.assertEqual(open_tasks[0].action_text, "Reply to the sender")
+            self.assertIsNone(open_tasks[0].completed_at)
+            self.assertEqual(len(completed_tasks), 0)
+            del open_tasks
+            del completed_tasks
             del repository
             del database
             gc.collect()
@@ -747,6 +900,7 @@ class RepositoryAnalysisTargetTests(unittest.TestCase):
                     to_list=["vendor@example.com"],
                     cc_list=[],
                     received_at=outbound_at,
+                    body_text="Checking whether the vendor can confirm the schedule.",
                     raw_preview="Checking whether the vendor can confirm the schedule.",
                     attachment_names=[],
                     attachment_paths=[],
@@ -797,6 +951,7 @@ class RepositoryAnalysisTargetTests(unittest.TestCase):
                     to_list=["finance@example.com"],
                     cc_list=[],
                     received_at=datetime(2026, 3, 10, 10, 0, 0),
+                    body_text="Following up on the budget request.",
                     raw_preview="Following up on the budget request.",
                     in_reply_to="mask-root",
                     references=["mask-root"],

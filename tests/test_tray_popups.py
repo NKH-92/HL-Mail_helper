@@ -7,7 +7,7 @@ from app.ui import tray_popups
 
 class TrayPopupHelpersTests(unittest.TestCase):
     def test_popup_page_title_matches_known_views(self) -> None:
-        self.assertEqual(tray_popups.popup_page_title(tray_popups.POPUP_TODO_VIEW), "MailAI | 내 할일")
+        self.assertEqual(tray_popups.popup_page_title(tray_popups.POPUP_TODO_VIEW), "MailAI | 메일 분류")
         self.assertEqual(tray_popups.popup_page_title(tray_popups.POPUP_AUTO_SEND_VIEW), "MailAI | 자동발송")
         self.assertEqual(tray_popups.popup_page_title("unknown"), "MailAI Portable")
 

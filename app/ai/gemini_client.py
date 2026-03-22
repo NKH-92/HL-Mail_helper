@@ -132,6 +132,8 @@ class GeminiClient:
                     "content": user_prompt,
                 },
             ],
+            temperature=0.1,
+            top_p=0.95,
             timeout=config.gemini_timeout_seconds,
         )
         text = self._extract_openai_message_text(response)
@@ -170,6 +172,7 @@ class GeminiClient:
                 ],
                 "generationConfig": {
                     "temperature": 0.1,
+                    "topP": 0.95,
                 },
             }
 
@@ -187,6 +190,7 @@ class GeminiClient:
                 "responseMimeType": "application/json",
                 "responseJsonSchema": response_schema,
                 "temperature": 0.1,
+                "topP": 0.95,
             },
         }
 

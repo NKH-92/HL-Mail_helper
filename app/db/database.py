@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS mails (
     to_list_json TEXT NOT NULL,
     cc_list_json TEXT NOT NULL,
     received_at TEXT,
+    body_text TEXT NOT NULL DEFAULT '',
     raw_preview TEXT,
     attachment_names_json TEXT NOT NULL DEFAULT '[]',
     attachment_paths_json TEXT NOT NULL DEFAULT '[]',
@@ -39,6 +40,26 @@ CREATE TABLE IF NOT EXISTS mails (
     analysis_reason TEXT,
     suggested_task_title TEXT,
     confidence REAL,
+    is_to_me INTEGER NOT NULL DEFAULT 0,
+    is_cc_me INTEGER NOT NULL DEFAULT 0,
+    recipient_role TEXT,
+    is_system_sender INTEGER NOT NULL DEFAULT 0,
+    is_newsletter_like INTEGER NOT NULL DEFAULT 0,
+    sender_type TEXT,
+    rule_category INTEGER,
+    request_present INTEGER,
+    request_target TEXT,
+    request_target_is_me INTEGER,
+    urgency TEXT,
+    llm_category INTEGER,
+    final_category INTEGER,
+    correction_applied INTEGER NOT NULL DEFAULT 0,
+    correction_reason TEXT,
+    conflict_type TEXT,
+    model_name TEXT,
+    analyzed_at TEXT,
+    raw_llm_json TEXT,
+    retention_bucket TEXT NOT NULL DEFAULT 'classified',
     status TEXT NOT NULL DEFAULT 'todo',
     analysis_status TEXT NOT NULL DEFAULT 'pending',
     analysis_error TEXT,
@@ -139,6 +160,9 @@ CREATE INDEX IF NOT EXISTS idx_mails_due_date ON mails(due_date);
 CREATE INDEX IF NOT EXISTS idx_mails_thread_key ON mails(thread_key);
 CREATE INDEX IF NOT EXISTS idx_mails_analysis_status_received ON mails(analysis_status, received_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_mails_thread_key_received ON mails(thread_key, received_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_mails_final_category ON mails(final_category);
+CREATE INDEX IF NOT EXISTS idx_mails_rule_category ON mails(rule_category);
+CREATE INDEX IF NOT EXISTS idx_mails_retention_bucket ON mails(retention_bucket);
 CREATE INDEX IF NOT EXISTS idx_thread_overview_cache_user_email ON thread_overview_cache(user_email);
 CREATE INDEX IF NOT EXISTS idx_action_items_mail_id ON action_items(mail_id);
 CREATE INDEX IF NOT EXISTS idx_action_items_scope_done ON action_items(scope, done_flag);
@@ -178,6 +202,7 @@ class DatabaseManager:
             self._ensure_column(connection, "mails", "thread_key", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(connection, "mails", "in_reply_to", "TEXT")
             self._ensure_column(connection, "mails", "references_json", "TEXT NOT NULL DEFAULT '[]'")
+            self._ensure_column(connection, "mails", "body_text", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(connection, "mails", "attachment_paths_json", "TEXT NOT NULL DEFAULT '[]'")
             self._ensure_column(connection, "mails", "action_classification", "TEXT")
             self._ensure_column(connection, "mails", "action_owner", "TEXT")
@@ -186,6 +211,26 @@ class DatabaseManager:
             self._ensure_column(connection, "mails", "evidence_json", "TEXT NOT NULL DEFAULT '[]'")
             self._ensure_column(connection, "mails", "analysis_reason", "TEXT")
             self._ensure_column(connection, "mails", "suggested_task_title", "TEXT")
+            self._ensure_column(connection, "mails", "is_to_me", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(connection, "mails", "is_cc_me", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(connection, "mails", "recipient_role", "TEXT")
+            self._ensure_column(connection, "mails", "is_system_sender", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(connection, "mails", "is_newsletter_like", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(connection, "mails", "sender_type", "TEXT")
+            self._ensure_column(connection, "mails", "rule_category", "INTEGER")
+            self._ensure_column(connection, "mails", "request_present", "INTEGER")
+            self._ensure_column(connection, "mails", "request_target", "TEXT")
+            self._ensure_column(connection, "mails", "request_target_is_me", "INTEGER")
+            self._ensure_column(connection, "mails", "urgency", "TEXT")
+            self._ensure_column(connection, "mails", "llm_category", "INTEGER")
+            self._ensure_column(connection, "mails", "final_category", "INTEGER")
+            self._ensure_column(connection, "mails", "correction_applied", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(connection, "mails", "correction_reason", "TEXT")
+            self._ensure_column(connection, "mails", "conflict_type", "TEXT")
+            self._ensure_column(connection, "mails", "model_name", "TEXT")
+            self._ensure_column(connection, "mails", "analyzed_at", "TEXT")
+            self._ensure_column(connection, "mails", "raw_llm_json", "TEXT")
+            self._ensure_column(connection, "mails", "retention_bucket", "TEXT NOT NULL DEFAULT 'classified'")
             self._ensure_column(connection, "action_items", "note", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(connection, "action_items", "updated_at", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(connection, "action_items", "completed_at", "TEXT")
@@ -205,6 +250,9 @@ class DatabaseManager:
                 "UPDATE mails SET references_json = '[]' WHERE references_json IS NULL OR references_json = ''"
             )
             connection.execute(
+                "UPDATE mails SET body_text = COALESCE(raw_preview, '') WHERE body_text IS NULL OR body_text = ''"
+            )
+            connection.execute(
                 "UPDATE mails SET attachment_paths_json = '[]' WHERE attachment_paths_json IS NULL OR attachment_paths_json = ''"
             )
             connection.execute(
@@ -214,10 +262,36 @@ class DatabaseManager:
                 "UPDATE mails SET evidence_json = '[]' WHERE evidence_json IS NULL OR evidence_json = ''"
             )
             connection.execute(
+                "UPDATE mails SET retention_bucket = 'classified' WHERE retention_bucket IS NULL OR retention_bucket = ''"
+            )
+            connection.execute(
                 "UPDATE action_items SET note = '' WHERE note IS NULL"
             )
             connection.execute(
                 "UPDATE action_items SET updated_at = created_at WHERE updated_at IS NULL OR updated_at = ''"
+            )
+            connection.execute(
+                """
+                UPDATE mails
+                SET status = 'done'
+                WHERE COALESCE(retention_bucket, 'classified') = 'completed'
+                  AND status != 'done'
+                """
+            )
+            connection.execute(
+                """
+                UPDATE action_items
+                SET done_flag = 1,
+                    completed_at = COALESCE(completed_at, NULLIF(updated_at, ''), created_at),
+                    updated_at = COALESCE(NULLIF(updated_at, ''), created_at)
+                WHERE scope = 'my'
+                  AND done_flag = 0
+                  AND mail_id IN (
+                      SELECT id
+                      FROM mails
+                      WHERE COALESCE(retention_bucket, 'classified') = 'completed'
+                  )
+                """
             )
             connection.commit()
 

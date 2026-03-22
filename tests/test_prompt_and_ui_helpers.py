@@ -590,6 +590,14 @@ class PromptAndUiHelperTests(unittest.TestCase):
         self.assertEqual(counts["reply"], 12)
         self.assertEqual(counts["waiting"], 3)
 
+    def test_resolve_dashboard_mail_tab_for_counts_falls_back_to_first_non_empty_tab(self) -> None:
+        resolved = ui_state_helpers.resolve_dashboard_mail_tab_for_counts(
+            "category_1",
+            {"category_1": 0, "category_2": 3, "category_3": 1},
+        )
+
+        self.assertEqual(resolved, "category_2")
+
     def test_settings_submission_preserves_hidden_advanced_values(self) -> None:
         current = AppConfig(
             user_email="saved@example.com",
@@ -781,12 +789,14 @@ class PromptAndUiHelperTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn("HL-MailBot 대시보드", html)
-        self.assertIn("HL-KMail Bot", html)
+        self.assertIn("HL-Mail Helper 대시보드", html)
+        self.assertIn("HL-Mail Helper", html)
         self.assertIn("title=\"사이드바 접기 또는 펼치기\"", html)
         self.assertIn("사용자 계정", html)
         self.assertIn("불러오는 중...", html)
         self.assertIn("메일 분류", html)
+        self.assertIn("보관함", html)
+        self.assertIn("완료", html)
         self.assertIn("환경 설정", html)
         self.assertIn("템플릿 자동발송", html)
         self.assertIn("본문", html)
@@ -824,20 +834,33 @@ class PromptAndUiHelperTests(unittest.TestCase):
         self.assertNotIn("메일 원문", html)
         self.assertNotIn('id="mail-detail-container"', html)
         self.assertIn("뒤로가기", js)
-        self.assertIn("HL-KMail Bot", html)
+        self.assertIn("HL-Mail Helper", html)
         self.assertIn('class="toolbar-actions"', html)
         self.assertIn('id="theme-light-btn"', html)
         self.assertIn('id="theme-dark-btn"', html)
+        self.assertIn('id="dashboard-view-title"', html)
+        self.assertIn('id="dashboard-view-subtitle"', html)
+        self.assertIn('id="priority-list-title"', html)
         self.assertNotIn('sidebar-theme-section shrink-0', html)
         self.assertIn('id="tpl_attachment_dropzone"', html)
         self.assertIn('onclick="pickAttachmentFiles()"', html)
         self.assertIn('id="tpl_attachment_list"', html)
         self.assertNotIn("content-shell py-0", html)
         self.assertIn('dashboardMailTab: "category_1"', js)
+        self.assertIn("dashboardSection: null", js)
         self.assertIn('dashboardMailView: "list"', js)
         self.assertIn('dashboard_mail_tab', js)
         self.assertIn('dashboard_mail_view', js)
         self.assertIn('selected_mail_id', js)
+        self.assertIn("const DEFAULT_DASHBOARD_SECTIONS = {", js)
+        self.assertIn("function renderDashboardPageCopy()", js)
+        self.assertIn("function handleDashboardMailCollectionAction(event, action, mailId)", js)
+        self.assertIn("function resolveDashboardMailTabWithCounts(tabKey)", js)
+        self.assertIn("archive_mail", js)
+        self.assertIn("complete_mail", js)
+        self.assertIn("restore_mail", js)
+        self.assertIn("복구", js)
+        self.assertIn("window.handleDashboardMailCollectionAction = handleDashboardMailCollectionAction;", js)
         self.assertIn("function renderDashboardMailSummary()", js)
         self.assertIn("function showDashboardMailList()", js)
         self.assertIn("window.setDashboardMailTab = setDashboardMailTab;", js)

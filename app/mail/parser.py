@@ -221,6 +221,7 @@ def parse_email_bytes(
         to_list=to_list,
         cc_list=cc_list,
         received_at=received_at,
+        body_text=body_text,
         raw_preview=raw_preview,
         in_reply_to=in_reply_to,
         references=references,

@@ -57,17 +57,27 @@ If you add or rename a dashboard field:
 The main dashboard now uses a mail-classification payload, not the old thread/task board.
 
 - Canonical backend query: `MailRepository.list_classified_mails()`
+- Collection-aware backend query: `MailRepository.list_dashboard_mails(bucket=...)`
 - Shared payload builder: `build_classified_mail_dicts()` in `app/ui/ui_state_helpers.py`
 - Tray popups should mirror the same classification dataset and must not fall back to legacy open-action-item queries.
 - Supported tabs:
   - `category_1`: direct action
   - `category_2`: review needed
   - `category_3`: reference only
+- Supported left-side dashboard collections:
+  - `dashboard`: active classification inbox
+  - `archive`: retained mails that ignore `sync_days` pruning
+  - `completed`: mails removed from the main list but still pruned by `sync_days`
 - Client selection state:
   - `dashboard_mail_tab`
   - `dashboard_mail_view`
   - `selected_mail_id`
 - Clicking a mail summary should switch the list panel into a summary-only detail view with a back button.
+- Mail retention source of truth:
+  - `mails.retention_bucket`
+  - `classified`: main mail classification list
+  - `archived`: keep even after the sync retention window
+  - `completed`: hide from the main list and delete when the sync retention window expires
 
 ### Mail analysis changes
 

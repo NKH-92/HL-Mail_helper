@@ -13,10 +13,19 @@ import streamlit.components.v1 as components
 
 from app.core.config_manager import AppConfig
 from app.core.security import GEMINI_API_KEY, HANLIM_API_KEY, MAIL_PASSWORD_KEY
-from app.ui.page_config import AUTO_SEND_PAGE, resolve_page_id as _shared_resolve_page_id
+from app.ui.page_config import (
+    ARCHIVE_PAGE,
+    AUTO_SEND_PAGE,
+    COMPLETED_PAGE,
+    DASHBOARD_PAGE,
+    resolve_page_id as _shared_resolve_page_id,
+)
 from app.ui.ui_state_helpers import (
     DASHBOARD_THREAD_PAGE_SIZE as _DASHBOARD_THREAD_PAGE_SIZE,
+    build_classified_mail_dicts as _build_classified_mail_dicts,
+    build_dashboard_mail_page_context as _build_dashboard_mail_page_context,
     build_follow_up_mail_template as _build_follow_up_mail_template,
+    build_dashboard_mail_category_counts as _build_dashboard_mail_category_counts,
     build_dashboard_thread_page_state as _build_dashboard_thread_page_state,
     build_completed_task_dicts as _build_completed_task_dicts,
     build_dashboard_task_dicts as _build_dashboard_task_dicts,
@@ -27,9 +36,13 @@ from app.ui.ui_state_helpers import (
     build_settings_submission as _build_settings_submission,
     build_sync_status_dict as _build_sync_status_dict,
     format_mailbox_cycle_message as _format_mailbox_cycle_message,
+    normalize_dashboard_mail_tab as _normalize_dashboard_mail_tab,
+    normalize_dashboard_mail_view as _normalize_dashboard_mail_view,
     normalize_dashboard_thread_filter as _normalize_dashboard_thread_filter,
     normalize_dashboard_thread_page as _normalize_dashboard_thread_page,
     read_log_tail as _read_log_tail,
+    resolve_dashboard_mail_tab_for_counts as _resolve_dashboard_mail_tab_for_counts,
+    resolve_dashboard_mail_tab_key as _resolve_dashboard_mail_tab_key,
     validate_send_template as _validate_send_template,
 )
 
@@ -45,11 +58,11 @@ _AUTO_SEND_REGISTRATION_SELECTION_KEY = "autosend_selected_send_registration_id"
 _MODERN_UI_LAST_ACTION_ID_KEY = "modern_ui_last_client_action_id"
 _MODERN_UI_CLIENT_STATE_VERSION_KEY = "modern_ui_client_state_version"
 _MODERN_UI_FLASH_KEY = "modern_ui_flash"
-_DASHBOARD_TASK_TAB_KEY = "dashboard_task_tab"
-_DASHBOARD_THREAD_FILTER_KEY = "dashboard_thread_filter"
-_DASHBOARD_THREAD_PAGE_KEY = "dashboard_thread_page"
-_DASHBOARD_SELECTED_THREAD_KEY = "dashboard_selected_thread_key"
+_DASHBOARD_MAIL_TAB_KEY = "dashboard_mail_tab"
+_DASHBOARD_MAIL_VIEW_KEY = "dashboard_mail_view"
+_DASHBOARD_SELECTED_MAIL_ID_KEY = "dashboard_selected_mail_id"
 _ADDRESS_BOOK_PAGE_IDS = {"autosend"}
+_DASHBOARD_PAGE_IDS = {"dashboard", "archive", "completed"}
 
 
 @dataclass(slots=True)
@@ -242,17 +255,15 @@ def _sync_dashboard_client_state(result: object) -> None:
     st.session_state[_MODERN_UI_CLIENT_STATE_VERSION_KEY] = client_state_version
 
     client_state = result.get("client_state") if isinstance(result.get("client_state"), dict) else {}
-    st.session_state[_DASHBOARD_TASK_TAB_KEY] = (
-        "completed" if client_state.get("dashboard_task_tab") == "completed" else "open"
+    st.session_state[_DASHBOARD_MAIL_TAB_KEY] = _normalize_dashboard_mail_tab(
+        client_state.get("dashboard_mail_tab"),
     )
-    st.session_state[_DASHBOARD_THREAD_FILTER_KEY] = _normalize_dashboard_thread_filter(
-        client_state.get("dashboard_thread_filter"),
+    st.session_state[_DASHBOARD_MAIL_VIEW_KEY] = _normalize_dashboard_mail_view(
+        client_state.get("dashboard_mail_view"),
     )
-    st.session_state[_DASHBOARD_THREAD_PAGE_KEY] = _normalize_dashboard_thread_page(
-        client_state.get("dashboard_thread_page"),
-        default=st.session_state.get(_DASHBOARD_THREAD_PAGE_KEY, 1),
+    st.session_state[_DASHBOARD_SELECTED_MAIL_ID_KEY] = _normalize_positive_int(
+        client_state.get("selected_mail_id"),
     )
-    st.session_state[_DASHBOARD_SELECTED_THREAD_KEY] = str(client_state.get("selected_thread_key") or "").strip()
 
 
 def render_modern_dashboard(context: object, current_page: str) -> None:
@@ -298,7 +309,8 @@ def render_modern_dashboard(context: object, current_page: str) -> None:
         ),
     }
 
-    if page_id == "dashboard":
+    if page_id in _DASHBOARD_PAGE_IDS:
+        dashboard_page_context = _build_dashboard_mail_page_context(page_id)
         component_args["sync_status"] = _build_sync_status_dict(
             config,
             sync_snapshot=context.sync_service.get_status_snapshot(),
@@ -306,41 +318,35 @@ def render_modern_dashboard(context: object, current_page: str) -> None:
             analysis_warning=context.mailbox_service.get_analysis_warning(),
             backlog_counts=context.mail_repository.count_analysis_backlog(),
         )
-        thread_overviews = context.mail_repository.list_thread_overviews(
-            user_email=config.user_email,
+        classified_mails = context.mail_repository.list_dashboard_mails(
+            str(dashboard_page_context.get("bucket_key") or "classified"),
+            limit=200,
         )
-        paged_threads, pagination, filter_counts = _build_dashboard_thread_page_state(
-            thread_overviews,
-            filter_key=st.session_state.get(_DASHBOARD_THREAD_FILTER_KEY, "all"),
-            page=st.session_state.get(_DASHBOARD_THREAD_PAGE_KEY, 1),
-            page_size=_DASHBOARD_THREAD_PAGE_SIZE,
+        category_counts = _build_dashboard_mail_category_counts(classified_mails)
+        visible_mail_ids = [int(mail.id) for mail in classified_mails]
+        selected_mail_id = _normalize_positive_int(st.session_state.get(_DASHBOARD_SELECTED_MAIL_ID_KEY, 0))
+        if selected_mail_id not in visible_mail_ids:
+            selected_mail_id = visible_mail_ids[0] if visible_mail_ids else 0
+        st.session_state[_DASHBOARD_SELECTED_MAIL_ID_KEY] = selected_mail_id
+        dashboard_mail_tab = _resolve_dashboard_mail_tab_for_counts(
+            st.session_state.get(_DASHBOARD_MAIL_TAB_KEY, "category_1"),
+            category_counts,
         )
-        st.session_state[_DASHBOARD_THREAD_FILTER_KEY] = str(pagination["filter"])
-        st.session_state[_DASHBOARD_THREAD_PAGE_KEY] = int(pagination["page"])
-        tasks = context.mail_repository.list_open_my_action_items()
-        completed_tasks = context.mail_repository.list_completed_my_action_items(limit=20)
+        dashboard_mail_view = _normalize_dashboard_mail_view(
+            st.session_state.get(_DASHBOARD_MAIL_VIEW_KEY, "list"),
+        )
+        st.session_state[_DASHBOARD_MAIL_TAB_KEY] = dashboard_mail_tab
+        st.session_state[_DASHBOARD_MAIL_VIEW_KEY] = dashboard_mail_view
 
-        priority_threads = _build_priority_thread_dicts(
-            paged_threads,
-            mail_repository=context.mail_repository,
+        component_args["classified_mails"] = _build_classified_mail_dicts(
+            classified_mails,
             address_book_service=context.address_book_service,
-            current_user_email=config.user_email,
-            include_details=False,
         )
-        visible_thread_keys = [str(thread["thread_key"]) for thread in priority_threads if thread.get("thread_key")]
-        selected_thread_key = str(st.session_state.get(_DASHBOARD_SELECTED_THREAD_KEY, "") or "")
-        if selected_thread_key not in visible_thread_keys:
-            selected_thread_key = visible_thread_keys[0] if visible_thread_keys else ""
-        st.session_state[_DASHBOARD_SELECTED_THREAD_KEY] = selected_thread_key
-
-        component_args["priority_threads"] = priority_threads
-        component_args["selected_thread_key"] = selected_thread_key
-        component_args["dashboard_thread_filter"] = st.session_state[_DASHBOARD_THREAD_FILTER_KEY]
-        component_args["dashboard_thread_filter_counts"] = filter_counts
-        component_args["dashboard_thread_pagination"] = pagination
-        component_args["tasks"] = _build_dashboard_task_dicts(tasks)
-        component_args["completed_tasks"] = _build_completed_task_dicts(completed_tasks)
-        component_args["task_tab"] = st.session_state.get(_DASHBOARD_TASK_TAB_KEY, "open")
+        component_args["dashboard_section"] = dashboard_page_context
+        component_args["dashboard_mail_category_counts"] = category_counts
+        component_args["dashboard_mail_tab"] = dashboard_mail_tab
+        component_args["dashboard_mail_view"] = dashboard_mail_view
+        component_args["selected_mail_id"] = selected_mail_id
         component_args["flash_msg"] = (
             st.session_state.pop(_MODERN_UI_FLASH_KEY, None) or _consume_streamlit_sync_flash_message()
         )
@@ -482,20 +488,57 @@ def render_modern_dashboard(context: object, current_page: str) -> None:
         st.rerun()
         return
 
-    if action == "toggle_task":
-        task_id = payload.get("task_id")
-        checked = bool(payload.get("checked"))
-        if task_id:
-            mail_id = context.mail_repository.mark_action_item_done(task_id, checked)
-            st.session_state[_DASHBOARD_TASK_TAB_KEY] = "completed" if checked else "open"
-            if mail_id and checked and context.mail_repository.count_open_action_items(mail_id, "my") == 0:
-                context.mail_repository.update_status(mail_id, "done", sync_my_action_items=True)
-            elif mail_id and not checked:
-                context.mail_repository.update_status(mail_id, "doing")
-            st.rerun()
+    if action == "refresh_dashboard":
+        st.rerun()
         return
 
-    if action == "refresh_dashboard":
+    if action == "select_mail":
+        st.rerun()
+        return
+
+    if action == "archive_mail":
+        mail_id = _normalize_positive_int(payload.get("mail_id"))
+        if mail_id:
+            moved_mail = context.mail_repository.move_mail_retention_bucket(mail_id, "archived")
+            st.session_state[_MODERN_UI_FLASH_KEY] = (
+                "메일을 보관함으로 이동했습니다."
+                if moved_mail is not None
+                else "메일 이동에 실패했습니다. 다시 시도해 주세요."
+            )
+        st.rerun()
+        return
+
+    if action == "complete_mail":
+        mail_id = _normalize_positive_int(payload.get("mail_id"))
+        if mail_id:
+            mail = context.mail_repository.move_mail_retention_bucket(mail_id, "completed")
+            if mail is not None and st.session_state.get("current_page") == ARCHIVE_PAGE:
+                st.session_state["current_page"] = COMPLETED_PAGE
+                st.session_state[_DASHBOARD_MAIL_TAB_KEY] = _resolve_dashboard_mail_tab_key(mail)
+                st.session_state[_DASHBOARD_SELECTED_MAIL_ID_KEY] = mail_id
+                st.session_state[_DASHBOARD_MAIL_VIEW_KEY] = "detail"
+            st.session_state[_MODERN_UI_FLASH_KEY] = (
+                "메일을 완료 목록으로 이동했습니다."
+                if mail is not None
+                else "메일 이동에 실패했습니다. 다시 시도해 주세요."
+            )
+        st.rerun()
+        return
+
+    if action == "restore_mail":
+        mail_id = _normalize_positive_int(payload.get("mail_id"))
+        if mail_id:
+            mail = context.mail_repository.move_mail_retention_bucket(mail_id, "classified")
+            if mail is not None:
+                st.session_state["current_page"] = DASHBOARD_PAGE
+                st.session_state[_DASHBOARD_MAIL_TAB_KEY] = _resolve_dashboard_mail_tab_key(mail)
+                st.session_state[_DASHBOARD_SELECTED_MAIL_ID_KEY] = mail_id
+                st.session_state[_DASHBOARD_MAIL_VIEW_KEY] = "detail"
+            st.session_state[_MODERN_UI_FLASH_KEY] = (
+                "메일을 분류 목록으로 복구했습니다."
+                if mail is not None
+                else "메일 복구에 실패했습니다. 다시 시도해 주세요."
+            )
         st.rerun()
         return
 

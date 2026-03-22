@@ -80,6 +80,7 @@ def _parsed_mail(
         to_list=["user@example.com"],
         cc_list=[],
         received_at=received_at,
+        body_text=f"{subject} full body",
         raw_preview=f"{subject} body",
         attachment_names=attachment_names or [],
         attachment_paths=attachment_paths or [],
@@ -663,6 +664,56 @@ class SyncServiceRetentionTests(unittest.TestCase):
             del app_settings_repository
             del database
             gc.collect()
+
+    def test_sync_service_keeps_archived_mails_beyond_sync_days(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_manager = ConfigManager(root / "config" / "settings.json")
+            config_manager.save(
+                AppConfig(
+                    user_email="user@example.com",
+                    mailbox="INBOX",
+                    sync_days=3,
+                )
+            )
+            database = DatabaseManager(root / "data" / "app.db")
+            mail_repository = MailRepository(database)
+            app_settings_repository = AppSettingsRepository(database)
+
+            archived_mail_id = mail_repository.create_from_parsed_mail(
+                _parsed_mail(
+                    "archived-message",
+                    "Archived mail",
+                    datetime.now() - timedelta(days=5),
+                )
+            )
+            assert archived_mail_id is not None
+            mail_repository.move_mail_retention_bucket(int(archived_mail_id), "archived")
+
+            service = SyncService(
+                config_manager=config_manager,
+                imap_client=_EmptyFetchImapClient(),
+                mail_repository=mail_repository,
+                app_settings_repository=app_settings_repository,
+                logger=logging.getLogger("test"),
+                storage_root=root,
+            )
+
+            try:
+                pruned_count = service.prune_local_mail_retention()
+                archived_mail = mail_repository.get_mail(int(archived_mail_id))
+
+                self.assertEqual(pruned_count, 0)
+                self.assertIsNotNone(archived_mail)
+                assert archived_mail is not None
+                self.assertEqual(archived_mail.message_id, "archived-message")
+                self.assertEqual(archived_mail.retention_bucket, "archived")
+            finally:
+                del service
+                del mail_repository
+                del app_settings_repository
+                del database
+                gc.collect()
 
     def test_sync_service_continues_backfill_until_cursor_is_exhausted(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

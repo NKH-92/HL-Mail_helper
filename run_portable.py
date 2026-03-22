@@ -50,7 +50,7 @@ class PopupWindowSpec:
 
 POPUP_WINDOW_SPECS = {
     TRAY_TODO_POPUP: PopupWindowSpec(
-        title="내 할일",
+        title="메일 분류",
         width=640,
         height=720,
         min_size=(520, 480),
@@ -95,7 +95,7 @@ class DesktopController:
                     APP_TITLE,
                     pystray.Menu(
                         pystray.MenuItem("열기", self._on_tray_open, default=True),
-                        pystray.MenuItem("할일", self._on_tray_todos),
+                        pystray.MenuItem("메일 분류", self._on_tray_todos),
                         pystray.MenuItem("자동발송", self._on_tray_autosend),
                         pystray.MenuItem("종료", self._on_tray_exit),
                     ),

@@ -61,10 +61,25 @@ def _cleanup_legacy_dist_folder(root: Path) -> None:
         shutil.rmtree(legacy_dist_dir, ignore_errors=True)
 
 
-def main() -> int:
-    root = ROOT
-    entrypoint = root / "run_portable.py"
-    clean_config_root = _create_clean_config_dir()
+def _append_add_data_args(
+    command: list[str],
+    source_path: Path,
+    target_name: str,
+    *,
+    required: bool = False,
+) -> None:
+    """Append one --add-data pair when the source exists."""
+
+    if not source_path.exists():
+        if required:
+            raise FileNotFoundError(f"Required PyInstaller data source is missing: {source_path}")
+        return
+    command.extend(["--add-data", f"{source_path};{target_name}"])
+
+
+def _build_pyinstaller_command(root: Path, entrypoint: Path, clean_config_root: Path) -> list[str]:
+    """Build the PyInstaller command with optional runtime assets."""
+
     command = [
         sys.executable,
         "-m",
@@ -95,16 +110,20 @@ def main() -> int:
         "app",
         "--hidden-import",
         "streamlit.runtime.scriptrunner.magic_funcs",
-        "--add-data",
-        f"{root / 'app'};app",
-        "--add-data",
-        f"{clean_config_root / 'config'};config",
-        "--add-data",
-        f"{root / '.streamlit'};.streamlit",
-        "--add-data",
-        f"{root / 'addressbook'};addressbook",
-        str(entrypoint),
     ]
+    _append_add_data_args(command, root / "app", "app", required=True)
+    _append_add_data_args(command, clean_config_root / "config", "config", required=True)
+    _append_add_data_args(command, root / ".streamlit", ".streamlit")
+    _append_add_data_args(command, root / "addressbook", "addressbook")
+    command.append(str(entrypoint))
+    return command
+
+
+def main() -> int:
+    root = ROOT
+    entrypoint = root / "run_portable.py"
+    clean_config_root = _create_clean_config_dir()
+    command = _build_pyinstaller_command(root, entrypoint, clean_config_root)
     try:
         _cleanup_legacy_dist_folder(root)
         result = subprocess.call(command, cwd=root)

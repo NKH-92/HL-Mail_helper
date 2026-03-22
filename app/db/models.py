@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Literal
 
 MailCategory = Literal["ACT", "FYI", "APR", "SCH", "QLT", "ETC"]
-MailPriority = Literal["high", "medium", "low", "unknown"]
+MailPriority = Literal["high", "medium", "low", "none", "unknown"]
 MailOwnershipStatus = Literal["direct_action", "review_needed", "reference_only"]
 MailActionClassification = Literal["ACTION_SELF", "ACTION_SHARED", "APPROVAL_REQUEST", "FYI", "ANNOUNCEMENT", "UNCLEAR"]
 MailActionOwner = Literal["me", "team", "other", "unknown"]
@@ -15,6 +15,12 @@ MailActionType = Literal["reply", "review", "approve", "submit", "prepare", "att
 MailWorkStatus = Literal["todo", "doing", "done"]
 AnalysisStatus = Literal["pending", "success", "failed"]
 TemplateRepeatType = Literal["none", "daily", "weekly", "monthly"]
+MailFinalCategory = Literal[1, 2, 3]
+MailRecipientRole = Literal["TO", "CC", "NONE"]
+MailSenderType = Literal["internal", "external", "system"]
+MailRequestTarget = Literal["me", "other", "group", "unknown"]
+MailUrgency = Literal["high", "medium", "low", "none", "unknown"]
+MailLlmActionType = Literal["REPLY", "REVIEW", "APPROVE", "SUBMIT", "MODIFY", "SCHEDULE", "FOLLOW_UP", "DECIDE", "NONE"]
 
 
 @dataclass(slots=True)
@@ -30,6 +36,7 @@ class ParsedMail:
     to_list: list[str]
     cc_list: list[str]
     received_at: datetime | None
+    body_text: str
     raw_preview: str
     in_reply_to: str | None = None
     references: list[str] = field(default_factory=list)
@@ -53,6 +60,7 @@ class MailRecord:
     to_list: list[str]
     cc_list: list[str]
     received_at: str | None
+    body_text: str
     raw_preview: str
     attachment_names: list[str]
     attachment_paths: list[str]
@@ -77,6 +85,26 @@ class MailRecord:
     evidence: list[str] = field(default_factory=list)
     analysis_reason: str | None = None
     suggested_task_title: str | None = None
+    is_to_me: bool = False
+    is_cc_me: bool = False
+    recipient_role: str | None = None
+    is_system_sender: bool = False
+    is_newsletter_like: bool = False
+    sender_type: str | None = None
+    rule_category: int | None = None
+    request_present: bool | None = None
+    request_target: str | None = None
+    request_target_is_me: bool | None = None
+    urgency: str | None = None
+    llm_category: int | None = None
+    final_category: int | None = None
+    correction_applied: bool = False
+    correction_reason: str | None = None
+    conflict_type: str | None = None
+    model_name: str | None = None
+    analyzed_at: str | None = None
+    raw_llm_json: str | None = None
+    retention_bucket: str = "classified"
 
 
 @dataclass(slots=True)

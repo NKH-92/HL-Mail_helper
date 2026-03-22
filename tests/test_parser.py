@@ -38,6 +38,8 @@ class ParserTests(unittest.TestCase):
 
         parsed = parse_email_bytes(raw_message)
 
+        self.assertIn("Hello", parsed.body_text)
+        self.assertIn("World", parsed.body_text)
         self.assertIn("Hello", parsed.raw_preview)
         self.assertIn("World", parsed.raw_preview)
         self.assertNotIn("alert", parsed.raw_preview)

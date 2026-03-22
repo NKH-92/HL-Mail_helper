@@ -14,6 +14,51 @@ from app.db.models import ActionItemRecord, MailRecord, MailTemplate, SendTempla
 
 DASHBOARD_THREAD_PAGE_SIZE = 10
 _DASHBOARD_THREAD_FILTER_KEYS = ("all", "today", "reply", "approval", "waiting", "review")
+_DASHBOARD_MAIL_TAB_KEYS = ("category_1", "category_2", "category_3")
+_DASHBOARD_MAIL_VIEW_KEYS = ("list", "detail")
+_DASHBOARD_MAIL_PAGE_CONTEXTS = {
+    "dashboard": {
+        "bucket_key": "classified",
+        "page_title": "메일 분류",
+        "hero_title": "메일 분류",
+        "hero_subtitle": (
+            "수신 메일을 내가 할 일, 검토 필요, 참고용으로 자동 분류하고 클릭 시 핵심 요약 화면으로 전환해 확인할 수 있습니다."
+        ),
+        "list_title": "메일 분류 목록",
+        "empty_list_message": "현재 탭에 표시할 메일이 없습니다.",
+        "detail_kicker": "Mail Summary",
+        "detail_title": "선택한 메일의 핵심 내용만 빠르게 확인합니다.",
+        "allow_archive_action": True,
+        "allow_complete_action": True,
+        "allow_restore_action": False,
+    },
+    "archive": {
+        "bucket_key": "archived",
+        "page_title": "보관함",
+        "hero_title": "보관함",
+        "hero_subtitle": "보관한 메일을 분류별로 오래 유지하고, 동기화 기간과 무관하게 다시 확인할 수 있습니다.",
+        "list_title": "보관 메일 목록",
+        "empty_list_message": "현재 탭에 표시할 보관 메일이 없습니다.",
+        "detail_kicker": "Archive",
+        "detail_title": "보관된 메일의 핵심 내용을 다시 확인합니다.",
+        "allow_archive_action": False,
+        "allow_complete_action": True,
+        "allow_restore_action": True,
+    },
+    "completed": {
+        "bucket_key": "completed",
+        "page_title": "완료",
+        "hero_title": "완료",
+        "hero_subtitle": "완료 처리한 메일을 동기화 보관 기간 안에서만 임시로 유지하고 다시 확인할 수 있습니다.",
+        "list_title": "완료 메일 목록",
+        "empty_list_message": "현재 탭에 표시할 완료 메일이 없습니다.",
+        "detail_kicker": "Completed",
+        "detail_title": "완료 처리한 메일의 핵심 내용을 다시 확인합니다.",
+        "allow_archive_action": False,
+        "allow_complete_action": False,
+        "allow_restore_action": True,
+    },
+}
 
 
 def read_log_tail(log_file_path: Path, limit: int = 20000) -> str:
@@ -167,6 +212,130 @@ def build_completed_task_dicts(tasks: list[TodoItemRecord]) -> list[dict[str, ob
             }
         )
     return task_dicts
+
+
+def normalize_dashboard_mail_tab(value: object) -> str:
+    normalized = str(value or "").strip().lower()
+    return normalized if normalized in _DASHBOARD_MAIL_TAB_KEYS else "category_1"
+
+
+def normalize_dashboard_mail_view(value: object) -> str:
+    normalized = str(value or "").strip().lower()
+    return normalized if normalized in _DASHBOARD_MAIL_VIEW_KEYS else "list"
+
+
+def build_dashboard_mail_page_context(page_id: str) -> dict[str, object]:
+    normalized_page_id = str(page_id or "").strip().lower()
+    context = _DASHBOARD_MAIL_PAGE_CONTEXTS.get(
+        normalized_page_id,
+        _DASHBOARD_MAIL_PAGE_CONTEXTS["dashboard"],
+    )
+    payload = dict(context)
+    payload["collection_tabs"] = [
+        {
+            "page_id": tab_page_id,
+            "label": str(_DASHBOARD_MAIL_PAGE_CONTEXTS[tab_page_id]["page_title"]),
+            "is_active": tab_page_id == normalized_page_id,
+        }
+        for tab_page_id in ("dashboard", "archive", "completed")
+    ]
+    return payload
+
+
+def _resolve_dashboard_mail_category(mail: MailRecord) -> int:
+    final_category = int(getattr(mail, "final_category", 0) or 0)
+    if final_category in {1, 2, 3}:
+        return final_category
+
+    status_map = {
+        "direct_action": 1,
+        "review_needed": 2,
+        "reference_only": 3,
+    }
+    mapped = status_map.get(str(getattr(mail, "my_action_status", "") or "").strip().lower())
+    return int(mapped or 3)
+
+
+def resolve_dashboard_mail_tab_key(mail: MailRecord | None) -> str:
+    if mail is None:
+        return "category_1"
+    return f"category_{_resolve_dashboard_mail_category(mail)}"
+
+
+def build_dashboard_mail_category_counts(mails: list[MailRecord]) -> dict[str, int]:
+    counts = {key: 0 for key in _DASHBOARD_MAIL_TAB_KEYS}
+    for mail in mails:
+        category = _resolve_dashboard_mail_category(mail)
+        tab_key = f"category_{category}"
+        if tab_key in counts:
+            counts[tab_key] += 1
+    return counts
+
+
+def resolve_dashboard_mail_tab_for_counts(value: object, counts: dict[str, int] | None = None) -> str:
+    normalized_tab = normalize_dashboard_mail_tab(value)
+    normalized_counts = counts if isinstance(counts, dict) else {}
+    if int(normalized_counts.get(normalized_tab, 0) or 0) > 0:
+        return normalized_tab
+    for tab_key in _DASHBOARD_MAIL_TAB_KEYS:
+        if int(normalized_counts.get(tab_key, 0) or 0) > 0:
+            return tab_key
+    return normalized_tab
+
+
+def build_classified_mail_dicts(
+    mails: list[MailRecord],
+    *,
+    address_book_service: Any,
+) -> list[dict[str, object]]:
+    category_label_map = {
+        1: "내가 할일이 있는 메일",
+        2: "내가 검토할 필요가 있는 메일",
+        3: "참고용 메일",
+    }
+    mail_dicts: list[dict[str, object]] = []
+    for mail in mails:
+        sender_name = address_book_service.resolve_display_name(mail.sender_email, mail.sender_name or None)
+        final_category = _resolve_dashboard_mail_category(mail)
+        summary_lines = [str(item or "").strip() for item in (mail.summary_long or []) if str(item or "").strip()]
+        mail_dicts.append(
+            {
+                "id": mail.id,
+                "message_id": mail.message_id,
+                "thread_key": mail.thread_key,
+                "subject": mail.subject,
+                "sender": sender_name,
+                "sender_email": mail.sender_email,
+                "received_at": _format_thread_datetime(mail.received_at),
+                "summary": mail.summary_short or _collapse_preview(mail.raw_preview, limit=150) or mail.subject,
+                "summary_long": summary_lines,
+                "preview": _collapse_preview(mail.raw_preview, limit=180),
+                "due_date": _format_thread_datetime(mail.due_date),
+                "urgency": mail.urgency or "unknown",
+                "action_types": list(mail.action_types or []),
+                "final_category": final_category,
+                "final_category_label": category_label_map.get(final_category, category_label_map[3]),
+                "rule_category": int(mail.rule_category or final_category),
+                "llm_category": int(mail.llm_category or final_category),
+                "request_present": bool(mail.request_present) if mail.request_present is not None else False,
+                "request_target": mail.request_target or "unknown",
+                "request_target_is_me": bool(mail.request_target_is_me) if mail.request_target_is_me is not None else False,
+                "evidence": list(mail.evidence or []),
+                "correction_applied": bool(mail.correction_applied),
+                "correction_reason": mail.correction_reason or "",
+                "conflict_type": mail.conflict_type or "",
+                "recipient_role": mail.recipient_role or "NONE",
+                "is_system_sender": bool(mail.is_system_sender),
+                "is_newsletter_like": bool(mail.is_newsletter_like),
+                "sender_type": mail.sender_type or "",
+                "confidence": float(mail.confidence or 0.0),
+                "attachments": list(mail.attachment_names or []),
+                "analysis_status": mail.analysis_status,
+                "analysis_error": mail.analysis_error or "",
+                "retention_bucket": str(getattr(mail, "retention_bucket", "classified") or "classified"),
+            }
+        )
+    return mail_dicts
 
 
 def _collapse_preview(value: str | None, limit: int = 160) -> str:

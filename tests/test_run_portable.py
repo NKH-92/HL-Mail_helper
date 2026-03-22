@@ -80,6 +80,8 @@ class RunPortableHelpersTests(unittest.TestCase):
         todo_spec = run_portable.POPUP_WINDOW_SPECS[run_portable.TRAY_TODO_POPUP]
         autosend_spec = run_portable.POPUP_WINDOW_SPECS[run_portable.TRAY_AUTO_SEND_POPUP]
 
+        self.assertEqual(todo_spec.title, "메일 분류")
+        self.assertEqual(autosend_spec.title, "자동발송")
         self.assertEqual((todo_spec.width, todo_spec.height, todo_spec.min_size), (640, 720, (520, 480)))
         self.assertEqual((autosend_spec.width, autosend_spec.height, autosend_spec.min_size), (720, 760, (560, 520)))
 

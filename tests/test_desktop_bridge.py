@@ -11,7 +11,7 @@ from unittest.mock import patch
 from app.core.security import GEMINI_API_KEY, HANLIM_API_KEY, MAIL_PASSWORD_KEY
 from app.db.models import MailRecord
 from app.ui.desktop_bridge import DesktopApi, TRAY_AUTO_SEND_POPUP, TRAY_TODO_POPUP
-from app.ui.page_config import AUTO_SEND_PAGE, DASHBOARD_PAGE, HELP_PAGE, SETTINGS_PAGE
+from app.ui.page_config import ARCHIVE_PAGE, AUTO_SEND_PAGE, COMPLETED_PAGE, DASHBOARD_PAGE, HELP_PAGE, SETTINGS_PAGE
 
 
 class DesktopBridgeTests(unittest.TestCase):
@@ -71,9 +71,21 @@ class DesktopBridgeTests(unittest.TestCase):
             return False
 
     class _FakeMailRepository:
-        def __init__(self, todos: list[object], *, classified_mails: list[MailRecord] | None = None) -> None:
+        def __init__(
+            self,
+            todos: list[object],
+            *,
+            classified_mails: list[MailRecord] | None = None,
+            archived_mails: list[MailRecord] | None = None,
+            completed_mails: list[MailRecord] | None = None,
+        ) -> None:
             self._todos = todos
-            self._classified_mails = classified_mails or []
+            self._dashboard_mails = {
+                "classified": classified_mails or [],
+                "archived": archived_mails or [],
+                "completed": completed_mails or [],
+            }
+            self.moves: list[tuple[int, str]] = []
 
         def list_open_my_action_items(self) -> list[object]:
             return list(self._todos)
@@ -83,7 +95,41 @@ class DesktopBridgeTests(unittest.TestCase):
             return []
 
         def list_classified_mails(self, limit: int = 200) -> list[MailRecord]:
-            return list(self._classified_mails[:limit])
+            return self.list_dashboard_mails("classified", limit=limit)
+
+        def list_dashboard_mails(self, bucket: str = "classified", limit: int = 200) -> list[MailRecord]:
+            return list(self._dashboard_mails.get(bucket, [])[:limit])
+
+        def count_dashboard_mail_categories(self, bucket: str = "classified") -> dict[str, int]:
+            counts = {"category_1": 0, "category_2": 0, "category_3": 0}
+            for mail in self._dashboard_mails.get(bucket, []):
+                category = int(mail.final_category or 3)
+                key = f"category_{category if category in {1, 2, 3} else 3}"
+                counts[key] += 1
+            return counts
+
+        def get_mail(self, mail_id: int) -> MailRecord | None:
+            for mails in self._dashboard_mails.values():
+                for mail in mails:
+                    if mail.id == mail_id:
+                        return mail
+            return None
+
+        def move_mail_retention_bucket(self, mail_id: int, bucket: str) -> MailRecord | None:
+            moved_mail: MailRecord | None = None
+            for bucket_key, mails in self._dashboard_mails.items():
+                for index, mail in enumerate(list(mails)):
+                    if mail.id == mail_id:
+                        moved_mail = mail
+                        del self._dashboard_mails[bucket_key][index]
+                        break
+                if moved_mail is not None:
+                    break
+            if moved_mail is not None:
+                self.moves.append((mail_id, bucket))
+                moved_mail.retention_bucket = bucket
+                self._dashboard_mails.setdefault(bucket, []).append(moved_mail)
+            return moved_mail
 
         @staticmethod
         def count_analysis_backlog() -> dict[str, int]:
@@ -235,9 +281,16 @@ class DesktopBridgeTests(unittest.TestCase):
         todos: list[object] | None = None,
         templates: list[object] | None = None,
         classified_mails: list[MailRecord] | None = None,
+        archived_mails: list[MailRecord] | None = None,
+        completed_mails: list[MailRecord] | None = None,
     ) -> object:
         return SimpleNamespace(
-            mail_repository=self._FakeMailRepository(todos or [], classified_mails=classified_mails),
+            mail_repository=self._FakeMailRepository(
+                todos or [],
+                classified_mails=classified_mails,
+                archived_mails=archived_mails,
+                completed_mails=completed_mails,
+            ),
             template_service=self._FakeTemplateService(templates or []),
             send_service=self._FakeSendService(),
             scheduler_manager=self._FakeSchedulerManager(),
@@ -253,6 +306,8 @@ class DesktopBridgeTests(unittest.TestCase):
         has_api_key: bool = False,
         has_hanlim_api_key: bool = False,
         classified_mails: list[MailRecord] | None = None,
+        archived_mails: list[MailRecord] | None = None,
+        completed_mails: list[MailRecord] | None = None,
     ) -> object:
         config = self._FakeConfig(ready=ready)
         return SimpleNamespace(
@@ -263,7 +318,12 @@ class DesktopBridgeTests(unittest.TestCase):
                 has_api_key=has_api_key,
                 has_hanlim_api_key=has_hanlim_api_key,
             ),
-            mail_repository=self._FakeMailRepository([], classified_mails=classified_mails),
+            mail_repository=self._FakeMailRepository(
+                [],
+                classified_mails=classified_mails,
+                archived_mails=archived_mails,
+                completed_mails=completed_mails,
+            ),
             template_service=self._FakeTemplateService([]),
             mail_template_service=SimpleNamespace(list_templates=lambda: []),
             send_service=self._FakeSendService(),
@@ -305,10 +365,14 @@ class DesktopBridgeTests(unittest.TestCase):
         self.assertIn('font-family: "Segoe UI Variable Text"', html)
         self.assertIn("grid-template-columns: repeat(4, minmax(0, 1fr));", html)
         self.assertIn("data-popup-tab-root", html)
+        self.assertIn("data-popup-tab='bucket_classified'", html)
+        self.assertIn("data-popup-tab='bucket_archived'", html)
+        self.assertIn("data-popup-tab='bucket_completed'", html)
         self.assertIn("data-popup-tab='category_1'", html)
         self.assertIn("data-popup-tab='category_2'", html)
         self.assertIn("data-popup-tab='category_3'", html)
-        self.assertIn("function initPopupTabs()", html)
+        self.assertIn("function initPopupTabs(scope)", html)
+        self.assertIn("get_popup_collection_html", html)
         self.assertNotIn("Open Tasks", html)
 
     def test_todo_popup_html_separates_cards_by_category_tabs(self) -> None:
@@ -341,6 +405,33 @@ class DesktopBridgeTests(unittest.TestCase):
         self.assertIn("Reference summary", category_3_panel)
         self.assertNotIn("Action summary", category_3_panel)
         self.assertNotIn("Review summary", category_3_panel)
+
+    def test_todo_popup_html_lazy_loads_archive_and_completed_collections(self) -> None:
+        api = DesktopApi(
+            self._build_context(
+                classified_mails=[self._make_mail(1, final_category=1, subject="Inbox mail", summary="Inbox summary")],
+                archived_mails=[self._make_mail(2, final_category=2, subject="Archived mail", summary="Archived summary")],
+                completed_mails=[self._make_mail(3, final_category=3, subject="Completed mail", summary="Completed summary")],
+            )
+        )
+
+        html = api.get_popup_html(TRAY_TODO_POPUP)
+        archived_panel = html.split("data-popup-tab-panel='bucket_archived'", 1)[1].split(
+            "data-popup-tab-panel='bucket_completed'",
+            1,
+        )[0]
+
+        self.assertIn("보관함", html)
+        self.assertIn("완료", html)
+        self.assertIn("data-popup-loaded='false'", archived_panel)
+        self.assertNotIn("Archived summary", html)
+        self.assertNotIn("Completed summary", html)
+
+        archived_html = api.get_popup_collection_html(TRAY_TODO_POPUP, "archived")
+        completed_html = api.get_popup_collection_html(TRAY_TODO_POPUP, "completed")
+
+        self.assertIn("Archived summary", archived_html)
+        self.assertIn("Completed summary", completed_html)
 
     def test_not_ready_page_state_allows_help_but_redirects_dashboard(self) -> None:
         api = DesktopApi(self._build_page_state_context(ready=False, has_password=False))
@@ -385,8 +476,48 @@ class DesktopBridgeTests(unittest.TestCase):
         self.assertEqual(state["dashboard_mail_category_counts"]["category_3"], 1)
         self.assertEqual(len(state["classified_mails"]), 3)
         self.assertEqual(state["classified_mails"][1]["final_category"], 2)
-        self.assertEqual(state["classified_mails"][1]["body_text"], "Review mail full body")
+        self.assertNotIn("body_text", state["classified_mails"][1])
+        self.assertNotIn("attachment_paths", state["classified_mails"][1])
+        self.assertNotIn("to_list", state["classified_mails"][1])
+        self.assertNotIn("cc_list", state["classified_mails"][1])
+        self.assertEqual(state["classified_mails"][1]["attachments"], [])
         self.assertEqual(state["sync_status"]["interval_minutes"], 60)
+        self.assertEqual(state["dashboard_section"]["bucket_key"], "classified")
+
+    def test_archive_page_state_uses_archive_collection(self) -> None:
+        archive_mail = self._make_mail(9, final_category=1, subject="Archived mail", summary="보관 메일")
+        context = self._build_page_state_context(
+            ready=True,
+            has_password=True,
+            archived_mails=[archive_mail],
+        )
+        api = DesktopApi(context)
+
+        state = api._build_page_state(ARCHIVE_PAGE)
+
+        self.assertEqual(state["page"], ARCHIVE_PAGE)
+        self.assertEqual(state["page_id"], "archive")
+        self.assertEqual(state["dashboard_section"]["bucket_key"], "archived")
+        self.assertEqual(state["dashboard_section"]["page_title"], "보관함")
+        self.assertEqual(state["selected_mail_id"], 9)
+        self.assertEqual(len(state["classified_mails"]), 1)
+        self.assertEqual(state["classified_mails"][0]["subject"], "Archived mail")
+
+    def test_archive_page_state_falls_back_to_first_non_empty_category(self) -> None:
+        archive_mail = self._make_mail(19, final_category=2, subject="Archived review", summary="Review archive")
+        context = self._build_page_state_context(
+            ready=True,
+            has_password=True,
+            archived_mails=[archive_mail],
+        )
+        api = DesktopApi(context)
+        api.state.dashboard_mail_tab = "category_1"
+
+        state = api._build_page_state(ARCHIVE_PAGE)
+
+        self.assertEqual(state["dashboard_mail_tab"], "category_2")
+        self.assertEqual(state["dashboard_mail_category_counts"]["category_1"], 0)
+        self.assertEqual(state["dashboard_mail_category_counts"]["category_2"], 1)
 
     def test_stale_client_state_version_does_not_override_newer_dashboard_state(self) -> None:
         mails = [
@@ -443,6 +574,126 @@ class DesktopBridgeTests(unittest.TestCase):
         self.assertEqual(stale_state["dashboard_mail_view"], "list")
         self.assertEqual(stale_state["selected_mail_id"], 1)
         self.assertEqual(stale_state["client_state_version"], 2)
+
+    def test_archive_mail_action_moves_mail_to_archive_bucket(self) -> None:
+        context = self._build_page_state_context(
+            ready=True,
+            has_password=True,
+            classified_mails=[self._make_mail(1, final_category=1, subject="Action mail", summary="회신 필요")],
+        )
+        api = DesktopApi(context)
+        api.state.selected_mail_id = 1
+        api.state.dashboard_mail_view = "detail"
+
+        api.dispatch(
+            {
+                "page": DASHBOARD_PAGE,
+                "action": "archive_mail",
+                "payload": {"mail_id": 1},
+                "client_state": {"page": DASHBOARD_PAGE},
+            }
+        )
+
+        self.assertEqual(context.mail_repository.moves, [(1, "archived")])
+        self.assertEqual(api.state.dashboard_mail_view, "list")
+
+    def test_complete_mail_action_moves_mail_to_completed_bucket(self) -> None:
+        context = self._build_page_state_context(
+            ready=True,
+            has_password=True,
+            classified_mails=[self._make_mail(2, final_category=2, subject="Review mail", summary="검토 필요")],
+        )
+        api = DesktopApi(context)
+        api.state.selected_mail_id = 2
+        api.state.dashboard_mail_view = "detail"
+
+        api.dispatch(
+            {
+                "page": DASHBOARD_PAGE,
+                "action": "complete_mail",
+                "payload": {"mail_id": 2},
+                "client_state": {"page": DASHBOARD_PAGE},
+            }
+        )
+
+        self.assertEqual(context.mail_repository.moves, [(2, "completed")])
+        self.assertEqual(api.state.dashboard_mail_view, "list")
+
+    def test_restore_mail_action_moves_mail_back_to_dashboard_and_selects_it(self) -> None:
+        restored_mail = self._make_mail(3, final_category=2, subject="Archived review", summary="복구 대상")
+        context = self._build_page_state_context(
+            ready=True,
+            has_password=True,
+            archived_mails=[restored_mail],
+        )
+        api = DesktopApi(context)
+        api.state.current_page = ARCHIVE_PAGE
+        api.state.selected_mail_id = 3
+        api.state.dashboard_mail_view = "detail"
+
+        state = api.dispatch(
+            {
+                "page": ARCHIVE_PAGE,
+                "action": "restore_mail",
+                "payload": {"mail_id": 3},
+                "client_state": {"page": ARCHIVE_PAGE},
+            }
+        )
+
+        self.assertEqual(context.mail_repository.moves, [(3, "classified")])
+        self.assertEqual(state["page"], DASHBOARD_PAGE)
+        self.assertEqual(state["dashboard_mail_tab"], "category_2")
+        self.assertEqual(state["selected_mail_id"], 3)
+        self.assertEqual(state["dashboard_mail_view"], "detail")
+
+    def test_complete_mail_from_archive_opens_completed_page(self) -> None:
+        archived_mail = self._make_mail(4, final_category=1, subject="Archived action", summary="완료 이동")
+        context = self._build_page_state_context(
+            ready=True,
+            has_password=True,
+            archived_mails=[archived_mail],
+        )
+        api = DesktopApi(context)
+        api.state.current_page = ARCHIVE_PAGE
+        api.state.selected_mail_id = 4
+        api.state.dashboard_mail_view = "detail"
+
+        state = api.dispatch(
+            {
+                "page": ARCHIVE_PAGE,
+                "action": "complete_mail",
+                "payload": {"mail_id": 4},
+                "client_state": {"page": ARCHIVE_PAGE},
+            }
+        )
+
+        self.assertEqual(context.mail_repository.moves, [(4, "completed")])
+        self.assertEqual(state["page"], COMPLETED_PAGE)
+        self.assertEqual(state["dashboard_mail_tab"], "category_1")
+        self.assertEqual(state["selected_mail_id"], 4)
+        self.assertEqual(state["dashboard_mail_view"], "detail")
+
+    def test_restore_mail_failure_keeps_current_page_and_sets_error_flash(self) -> None:
+        context = self._build_page_state_context(
+            ready=True,
+            has_password=True,
+            archived_mails=[],
+        )
+        api = DesktopApi(context)
+        api.state.current_page = ARCHIVE_PAGE
+
+        state = api.dispatch(
+            {
+                "page": ARCHIVE_PAGE,
+                "action": "restore_mail",
+                "payload": {"mail_id": 999},
+                "client_state": {"page": ARCHIVE_PAGE},
+            }
+        )
+
+        self.assertEqual(context.mail_repository.moves, [])
+        self.assertEqual(state["page"], ARCHIVE_PAGE)
+        self.assertEqual(state["flash_msg"], "메일 복구에 실패했습니다. 다시 시도해 주세요.")
 
     def test_sync_mail_dispatch_runs_in_background_and_updates_sync_progress(self) -> None:
         progress_started = Event()

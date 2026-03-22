@@ -4,6 +4,8 @@ from __future__ import annotations
 
 
 DASHBOARD_PAGE = "메일 정리"
+ARCHIVE_PAGE = "보관함"
+COMPLETED_PAGE = "완료"
 AUTO_SEND_PAGE = "메일 자동발송"
 LEGACY_AUTO_SEND_PAGE = "템플릿 발송"
 LOGS_PAGE = "로그"
@@ -18,6 +20,8 @@ PAGE_ALIASES = {
 
 ALL_PAGES = {
     DASHBOARD_PAGE,
+    ARCHIVE_PAGE,
+    COMPLETED_PAGE,
     AUTO_SEND_PAGE,
     LOGS_PAGE,
     SETTINGS_PAGE,
@@ -38,6 +42,10 @@ def resolve_page_id(current_page: str) -> str:
 
     if current_page == DASHBOARD_PAGE:
         return "dashboard"
+    if current_page == ARCHIVE_PAGE:
+        return "archive"
+    if current_page == COMPLETED_PAGE:
+        return "completed"
     if current_page == AUTO_SEND_PAGE:
         return "autosend"
     if current_page == LOGS_PAGE:

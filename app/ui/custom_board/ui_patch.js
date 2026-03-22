@@ -11,21 +11,12 @@
         addressBookContacts: [],
         flashTimer: null,
         autosendSaveLocked: false,
-        dashboardTaskTab: "open",
-        dashboardThreads: [],
-        dashboardThreadFilter: "all",
-        dashboardThreadFilterCounts: { all: 0, today: 0, reply: 0, approval: 0, waiting: 0, review: 0 },
-        dashboardThreadPage: 1,
-        dashboardThreadPagination: {
-            page: 1,
-            page_size: 10,
-            total_items: 0,
-            total_pages: 1,
-            start_item: 0,
-            end_item: 0,
-            has_previous: false,
-            has_next: false,
-        },
+        dashboardMailTab: "category_1",
+        dashboardMailView: "list",
+        classifiedMails: [],
+        dashboardMailCategoryCounts: { category_1: 0, category_2: 0, category_3: 0 },
+        selectedMailId: 0,
+        dashboardSection: null,
         syncStatus: {},
         syncProgress: {},
         syncPollTimer: null,
@@ -42,7 +33,9 @@
     const THEME_STORAGE_KEY = "mailai-theme-mode";
 
     const HEADER_TITLES = {
-        dashboard: "메일 요약",
+        dashboard: "메일 분류",
+        archive: "보관함",
+        completed: "완료",
         autosend: "자동발송",
         logs: "로그",
         settings: "설정",
@@ -51,7 +44,10 @@
 
     const PAGE_ID_BY_LABEL = {
         "메일 정리": "dashboard",
+        "메일 분류": "dashboard",
         "대시보드": "dashboard",
+        "보관함": "archive",
+        "완료": "completed",
         "메일 자동발송": "autosend",
         "템플릿 자동발송": "autosend",
         "로그": "logs",
@@ -61,10 +57,54 @@
 
     const PAGE_LABEL_BY_ID = {
         dashboard: "메일 정리",
+        archive: "보관함",
+        completed: "완료",
         autosend: "메일 자동발송",
         logs: "로그",
         settings: "설정",
         help: "도움말",
+    };
+    const DASHBOARD_PAGE_IDS = ["dashboard", "archive", "completed"];
+    const DEFAULT_DASHBOARD_SECTIONS = {
+        dashboard: {
+            bucket_key: "classified",
+            page_title: "메일 분류",
+            hero_title: "메일 분류",
+            hero_subtitle: "수신 메일을 내가 할 일, 검토 필요, 참고용으로 자동 분류하고 클릭 시 핵심 요약 화면으로 전환해 확인할 수 있습니다.",
+            list_title: "메일 분류 목록",
+            empty_list_message: "현재 탭에 표시할 메일이 없습니다.",
+            detail_kicker: "Mail Summary",
+            detail_title: "선택한 메일의 핵심 내용만 빠르게 확인합니다.",
+            allow_archive_action: true,
+            allow_complete_action: true,
+            allow_restore_action: false,
+        },
+        archive: {
+            bucket_key: "archived",
+            page_title: "보관함",
+            hero_title: "보관함",
+            hero_subtitle: "보관한 메일을 분류별로 오래 유지하고, 동기화 기간과 무관하게 다시 확인할 수 있습니다.",
+            list_title: "보관 메일 목록",
+            empty_list_message: "현재 탭에 표시할 보관 메일이 없습니다.",
+            detail_kicker: "Archive",
+            detail_title: "보관된 메일의 핵심 내용을 다시 확인합니다.",
+            allow_archive_action: false,
+            allow_complete_action: true,
+            allow_restore_action: true,
+        },
+        completed: {
+            bucket_key: "completed",
+            page_title: "완료",
+            hero_title: "완료",
+            hero_subtitle: "완료 처리한 메일을 동기화 보관 기간 안에서만 임시로 유지하고 다시 확인할 수 있습니다.",
+            list_title: "완료 메일 목록",
+            empty_list_message: "현재 탭에 표시할 완료 메일이 없습니다.",
+            detail_kicker: "Completed",
+            detail_title: "완료 처리한 메일의 핵심 내용을 다시 확인합니다.",
+            allow_archive_action: false,
+            allow_complete_action: false,
+            allow_restore_action: true,
+        },
     };
 
     const FOLLOW_UP_LABELS = {
@@ -117,6 +157,26 @@
         "Untitled thread": "제목 없는 스레드",
     };
 
+    function getDashboardPageId(pageId) {
+        return DASHBOARD_PAGE_IDS.includes(String(pageId || "")) ? String(pageId) : "dashboard";
+    }
+
+    function resolveDashboardSection(section, pageId) {
+        const normalizedPageId = getDashboardPageId(pageId);
+        const fallback = DEFAULT_DASHBOARD_SECTIONS[normalizedPageId] || DEFAULT_DASHBOARD_SECTIONS.dashboard;
+        if (!section || typeof section !== "object") {
+            return { ...fallback };
+        }
+        return {
+            ...fallback,
+            ...section,
+            allow_archive_action: Boolean(section.allow_archive_action ?? fallback.allow_archive_action),
+            allow_complete_action: Boolean(section.allow_complete_action ?? fallback.allow_complete_action),
+            allow_restore_action: Boolean(section.allow_restore_action ?? fallback.allow_restore_action),
+            collection_tabs: Array.isArray(section.collection_tabs) ? section.collection_tabs : [],
+        };
+    }
+
     function isPywebviewRuntime() {
         return Boolean(window.pywebview && window.pywebview.api && typeof window.pywebview.api.dispatch === "function");
     }
@@ -135,9 +195,9 @@
     function getClientStateSnapshot() {
         return {
             page: state.currentPage || "",
-            dashboard_task_tab: state.dashboardTaskTab,
-            dashboard_thread_filter: state.dashboardThreadFilter,
-            dashboard_thread_page: state.dashboardThreadPage,
+            dashboard_mail_tab: state.dashboardMailTab,
+            dashboard_mail_view: state.dashboardMailView,
+            selected_mail_id: state.selectedMailId,
         };
     }
 
@@ -896,20 +956,17 @@
     function captureDashboardScrollPositions() {
         return {
             threadList: getElement("priority-thread-list")?.scrollTop || 0,
-            openTasks: getElement("task-container")?.scrollTop || 0,
-            completedTasks: getElement("completed-task-container")?.scrollTop || 0,
+            mailSummary: getElement("priority-thread-detail-view")?.scrollTop || 0,
         };
     }
 
     function restoreDashboardScrollPositions(positions) {
         const nextPositions = positions || {};
         const threadList = getElement("priority-thread-list");
-        const openTasks = getElement("task-container");
-        const completedTasks = getElement("completed-task-container");
+        const mailSummary = getElement("priority-thread-detail-view");
 
         if (threadList) threadList.scrollTop = Number(nextPositions.threadList || 0);
-        if (openTasks) openTasks.scrollTop = Number(nextPositions.openTasks || 0);
-        if (completedTasks) completedTasks.scrollTop = Number(nextPositions.completedTasks || 0);
+        if (mailSummary) mailSummary.scrollTop = Number(nextPositions.mailSummary || 0);
     }
 
     function syncMail() {
@@ -954,13 +1011,70 @@
     }
 
 
-    function setDashboardThreadPage(pageNumber) {
-        const totalPages = Math.max(1, Number(state.dashboardThreadPagination.total_pages || 1));
-        const nextPage = Math.min(totalPages, Math.max(1, Number(pageNumber || 1)));
-        if (nextPage === Number(state.dashboardThreadPage || 1)) {
+    function setDashboardMailTab(tabKey) {
+        const normalized = ["category_1", "category_2", "category_3"].includes(String(tabKey || ""))
+            ? String(tabKey)
+            : "category_1";
+        if (normalized === state.dashboardMailTab) {
             return;
         }
-        state.dashboardThreadPage = nextPage;
+        state.dashboardMailTab = normalized;
+        state.dashboardMailView = "list";
+        requestDashboardRefresh();
+    }
+
+    function selectDashboardMail(mailId) {
+        const nextMailId = Number(mailId || 0);
+        if (!nextMailId) {
+            return;
+        }
+        state.selectedMailId = nextMailId;
+        state.dashboardMailView = "detail";
+        UiBridge.dispatch({
+            action: "select_mail",
+            payload: { mail_id: nextMailId },
+            page: state.currentPage || PAGE_LABEL_BY_ID.dashboard,
+        });
+    }
+
+    function dispatchDashboardMailCollectionAction(action, mailId) {
+        const nextMailId = Number(mailId || 0);
+        if (!nextMailId) {
+            return;
+        }
+        if (Number(state.selectedMailId || 0) === nextMailId) {
+            state.dashboardMailView = "list";
+        }
+        UiBridge.dispatch({
+            action,
+            payload: { mail_id: nextMailId },
+            page: state.currentPage || PAGE_LABEL_BY_ID.dashboard,
+        });
+    }
+
+    function handleDashboardMailCollectionAction(event, action, mailId) {
+        if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+        if (action === "restore") {
+            dispatchDashboardMailCollectionAction("restore_mail", mailId);
+            return;
+        }
+        if (action === "archive") {
+            dispatchDashboardMailCollectionAction("archive_mail", mailId);
+            return;
+        }
+        if (action === "complete") {
+            dispatchDashboardMailCollectionAction("complete_mail", mailId);
+        }
+    }
+
+    function showDashboardMailList() {
+        if (state.dashboardMailView === "list") {
+            return;
+        }
+        state.dashboardMailView = "list";
         requestDashboardRefresh();
     }
 
@@ -2253,32 +2367,110 @@
     }
 
 
-    function getDashboardFilterOptions(threads) {
-        const counts = state.dashboardThreadFilterCounts || {};
+    function getDashboardMailTabOptions() {
+        const counts = state.dashboardMailCategoryCounts || {};
         return [
-            { key: "all", label: "전체", count: Number(counts.all || threads.length || 0) },
-            { key: "today", label: "긴급", count: Number(counts.today || 0) },
-            { key: "reply", label: "답장 필요", count: Number(counts.reply || 0) },
-            { key: "approval", label: "승인 대기", count: Number(counts.approval || 0) },
-            { key: "waiting", label: "회신 대기", count: Number(counts.waiting || 0) },
-            { key: "review", label: "검토 필요", count: Number(counts.review || 0) },
+            { key: "category_1", label: "내가해야할일", count: Number(counts.category_1 || 0) },
+            { key: "category_2", label: "내가검토할일", count: Number(counts.category_2 || 0) },
+            { key: "category_3", label: "단순 참고용", count: Number(counts.category_3 || 0) },
         ];
     }
 
-    function setDashboardThreadFilter(filterKey) {
-        state.dashboardThreadFilter = filterKey || "all";
-        state.dashboardThreadPage = 1;
-        renderDashboardFilterBar();
-        requestDashboardRefresh();
+    function resolveDashboardMailTabWithCounts(tabKey) {
+        const options = getDashboardMailTabOptions();
+        const normalized = options.some((option) => option.key === String(tabKey || ""))
+            ? String(tabKey)
+            : "category_1";
+        const activeOption = options.find((option) => option.key === normalized);
+        if (activeOption && Number(activeOption.count || 0) > 0) {
+            return normalized;
+        }
+        const fallbackOption = options.find((option) => Number(option.count || 0) > 0);
+        return fallbackOption ? fallbackOption.key : normalized;
+    }
+
+    function getFilteredDashboardMails() {
+        return state.classifiedMails.filter((mail) => `category_${Number(mail.final_category || 3)}` === state.dashboardMailTab);
+    }
+
+    function getSelectedDashboardMail() {
+        const filteredMails = getFilteredDashboardMails();
+        const selectedMail = filteredMails.find((mail) => Number(mail.id || 0) === Number(state.selectedMailId || 0));
+        return selectedMail || filteredMails[0] || null;
+    }
+
+    function renderDashboardPageCopy() {
+        const title = getElement("dashboard-view-title");
+        const subtitle = getElement("dashboard-view-subtitle");
+        const listTitle = getElement("priority-list-title");
+        const section = state.dashboardSection || DEFAULT_DASHBOARD_SECTIONS.dashboard;
+
+        if (title) title.innerText = section.hero_title || section.page_title || "메일 분류";
+        if (subtitle) subtitle.innerText = section.hero_subtitle || "";
+        if (listTitle) listTitle.innerText = section.list_title || "메일 분류 목록";
+    }
+
+    function buildDashboardMailActionButtonsMarkup(mail, options) {
+        const settings = options || {};
+        const allowArchive = Boolean(settings.allowArchive);
+        const allowComplete = Boolean(settings.allowComplete);
+        const allowRestore = Boolean(settings.allowRestore);
+        const mailId = Number(mail && mail.id ? mail.id : 0);
+        if (!mailId || (!allowArchive && !allowComplete && !allowRestore)) {
+            return "";
+        }
+
+        const buttons = [];
+        if (allowRestore) {
+            buttons.push(`
+                <button
+                    type="button"
+                    class="dashboard-mail-action-btn is-restore"
+                    onclick="window.handleDashboardMailCollectionAction(event, 'restore', ${mailId})">
+                    복구
+                </button>
+            `);
+        }
+        if (allowArchive) {
+            buttons.push(`
+                <button
+                    type="button"
+                    class="dashboard-mail-action-btn is-archive"
+                    onclick="window.handleDashboardMailCollectionAction(event, 'archive', ${mailId})">
+                    보관
+                </button>
+            `);
+        }
+        if (allowComplete) {
+            buttons.push(`
+                <button
+                    type="button"
+                    class="dashboard-mail-action-btn is-complete"
+                    onclick="window.handleDashboardMailCollectionAction(event, 'complete', ${mailId})">
+                    완료
+                </button>
+            `);
+        }
+        return buttons.join("");
     }
 
     function renderDashboardThreadPane() {
         const paginationShell = getElement("priority-pagination-shell");
         if (paginationShell) {
-            paginationShell.classList.toggle(
-                "hidden",
-                Number((state.dashboardThreadPagination || {}).total_items || 0) === 0,
-            );
+            paginationShell.classList.add("hidden");
+        }
+    }
+
+    function renderDashboardListDetailMode() {
+        const listSection = getElement("priority-thread-list-section");
+        const detailSection = getElement("priority-thread-detail-section");
+        const isDetail = state.dashboardMailView === "detail";
+
+        if (listSection) {
+            listSection.classList.toggle("hidden", isDetail);
+        }
+        if (detailSection) {
+            detailSection.classList.toggle("hidden", !isDetail);
         }
     }
 
@@ -2287,15 +2479,14 @@
         const shell = getElement("priority-filter-shell");
         if (!container) return;
 
-        const filters = getDashboardFilterOptions(state.dashboardThreads);
-        container.innerHTML = filters
-            .map((filter) => {
-                const isActive = state.dashboardThreadFilter === filter.key;
+        container.innerHTML = getDashboardMailTabOptions()
+            .map((tab) => {
+                const isActive = state.dashboardMailTab === tab.key;
                 const buttonClass = isActive ? "dashboard-filter-chip is-active" : "dashboard-filter-chip";
                 return `
-                    <button type="button" onclick="window.setDashboardThreadFilter('${filter.key}')" class="${buttonClass}">
-                        <span>${escapeHtml(filter.label)}</span>
-                        <span class="dashboard-filter-count">${Number(filter.count || 0)}</span>
+                    <button type="button" onclick="window.setDashboardMailTab('${tab.key}')" class="${buttonClass}" data-category="${escapeHtml(tab.key)}">
+                        <span>${escapeHtml(tab.label)}</span>
+                        <span class="dashboard-filter-count">${Number(tab.count || 0)}</span>
                     </button>
                 `;
             })
@@ -2306,67 +2497,63 @@
         }
     }
 
-    function buildDashboardPaginationTokens(currentPage, totalPages) {
-        if (totalPages <= 7) {
-            return Array.from({ length: totalPages }, (_, index) => index + 1);
+    function buildDashboardMailListMeta(mail) {
+        const meta = [];
+        if (mail.sender) {
+            meta.push(escapeHtml(mail.sender));
         }
-
-        const tokens = [1];
-        const start = Math.max(2, currentPage - 1);
-        const end = Math.min(totalPages - 1, currentPage + 1);
-
-        if (start > 2) {
-            tokens.push("left-gap");
+        if (mail.received_at) {
+            meta.push(escapeHtml(formatReadableDate(mail.received_at, { includeTime: true })));
         }
-        for (let page = start; page <= end; page += 1) {
-            tokens.push(page);
+        if (mail.recipient_role && mail.recipient_role !== "NONE") {
+            meta.push(escapeHtml(localizeDashboardRecipientRole(mail.recipient_role)));
         }
-        if (end < totalPages - 1) {
-            tokens.push("right-gap");
-        }
-        tokens.push(totalPages);
-        return tokens;
+        return meta.join(' <span class="dashboard-thread-separator">&middot;</span> ');
     }
 
-    function renderDashboardPagination() {
-        const shell = getElement("priority-pagination-shell");
-        const container = getElement("priority-pagination");
-        if (!shell || !container) return;
+    function localizeDashboardRecipientRole(value) {
+        const normalized = String(value || "").trim().toUpperCase();
+        if (normalized === "TO") return "직접 수신";
+        if (normalized === "CC") return "참조 수신";
+        if (!normalized || normalized === "NONE") return "";
+        return `수신 ${normalized}`;
+    }
 
-        const pagination = state.dashboardThreadPagination || {};
-        const totalPages = Math.max(1, Number(pagination.total_pages || 1));
-        const currentPage = Math.min(totalPages, Math.max(1, Number(pagination.page || 1)));
-        const totalItems = Number(pagination.total_items || 0);
+    function getDashboardMailCategoryClass(mail) {
+        const category = Number(mail && mail.final_category ? mail.final_category : 3);
+        if (category === 1) return "category-1";
+        if (category === 2) return "category-2";
+        return "category-3";
+    }
 
-        if (totalItems === 0) {
-            shell.classList.add("hidden");
-            container.innerHTML = "";
-            return;
+    function buildDashboardSummaryLines(mail) {
+        const lines = [];
+        const seen = new Set();
+
+        function appendLine(value) {
+            const text = String(value || "").replace(/\s+/g, " ").trim();
+            if (!text) return;
+            const key = text.toLowerCase();
+            if (seen.has(key)) return;
+            seen.add(key);
+            lines.push(text);
         }
 
-        shell.classList.toggle("hidden", totalPages <= 1);
-        if (totalPages <= 1) {
-            container.innerHTML = "";
-            return;
+        appendLine(mail.summary);
+        if (Array.isArray(mail.summary_long)) {
+            mail.summary_long.forEach((item) => appendLine(item));
         }
 
-        const navButtonClass = "inline-flex min-w-[2.25rem] items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-primary hover:text-primary disabled:cursor-default disabled:opacity-40 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200";
-        const activePageClass = "inline-flex min-w-[2.25rem] items-center justify-center rounded-lg border border-primary bg-primary px-3 py-2 text-xs font-semibold text-white shadow-sm";
-        const idlePageClass = "inline-flex min-w-[2.25rem] items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-primary hover:text-primary dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200";
+        if (!lines.length) {
+            String(mail.preview || "")
+                .split(/\r?\n+/)
+                .map((item) => item.trim())
+                .filter(Boolean)
+                .slice(0, 4)
+                .forEach((item) => appendLine(item));
+        }
 
-        container.innerHTML = `
-            <button type="button" onclick="window.setDashboardThreadPage(${currentPage - 1})" class="${navButtonClass}" ${currentPage <= 1 ? "disabled" : ""}>이전</button>
-            ${buildDashboardPaginationTokens(currentPage, totalPages)
-                .map((token) => {
-                    if (typeof token !== "number") {
-                        return '<span class="px-1 text-xs font-semibold text-slate-300">...</span>';
-                    }
-                    const className = token === currentPage ? activePageClass : idlePageClass;
-                    return `<button type="button" onclick="window.setDashboardThreadPage(${token})" class="${className}">${token}</button>`;
-                })
-                .join("")}
-            <button type="button" onclick="window.setDashboardThreadPage(${currentPage + 1})" class="${navButtonClass}" ${currentPage >= totalPages ? "disabled" : ""}>다음</button>
-        `;
+        return lines.slice(0, 5);
     }
 
     function renderDashboardThreadList() {
@@ -2374,137 +2561,214 @@
         const countText = getElement("priority-count-text");
         if (!container) return;
 
-        const threads = state.dashboardThreads;
-        const pagination = state.dashboardThreadPagination || {};
-        const totalItems = Number(pagination.total_items || threads.length || 0);
-        const startItem = Number(pagination.start_item || 0);
-        const endItem = Number(pagination.end_item || 0);
-
+        const mails = getFilteredDashboardMails();
+        const section = state.dashboardSection || DEFAULT_DASHBOARD_SECTIONS.dashboard;
         if (countText) {
-            countText.innerText = totalItems > 0 ? `${startItem}-${endItem} / ${totalItems}개 스레드` : "0개 스레드";
+            countText.innerText = `${mails.length}개 메일`;
         }
 
-        if (threads.length === 0) {
-            container.innerHTML = `<div class="dashboard-empty-state">${escapeHtml(localizeThreadCopy("No threads match this view."))}</div>`;
-            renderDashboardPagination();
+        if (mails.length === 0) {
+            container.innerHTML = `<div class="dashboard-empty-state">${escapeHtml(section.empty_list_message || "현재 탭에 표시할 메일이 없습니다.")}</div>`;
             return;
         }
 
-        container.innerHTML = threads
-            .map((thread) => {
-                const actionCount = Array.isArray(thread.my_actions) ? thread.my_actions.length : 0;
-                const subjectText = thread.subject || localizeThreadCopy("Untitled thread");
-                const actionPreview = getDashboardThreadActionPreview(thread, subjectText);
-                const summaryText = pickDashboardThreadLead(thread, subjectText, actionPreview);
-                const caption = pickDashboardThreadCaption(thread, subjectText, summaryText, actionPreview);
-                const captionText = caption && caption.text ? caption.text : "";
-                const receivedText = formatReadableDate(thread.latest_received_at || "", { includeTime: true });
-                const dueText = thread.due_date ? `기한 ${formatReadableDate(thread.due_date, { includeTime: true })}` : "";
-                const summaryMarkup = summaryText ? `<p class="dashboard-thread-summary">${escapeHtml(summaryText)}</p>` : "";
-                const captionMarkup = captionText ? `<p class="dashboard-thread-caption">${escapeHtml(captionText)}</p>` : "";
-
+        container.innerHTML = mails
+            .map((mail) => {
+                const isSelected = Number(mail.id || 0) === Number(state.selectedMailId || 0) && state.dashboardMailView === "detail";
+                const categoryClass = getDashboardMailCategoryClass(mail);
+                const buttonClass = isSelected
+                    ? `dashboard-mail-card ${categoryClass} is-selected`
+                    : `dashboard-mail-card ${categoryClass}`;
+                const actionButtons = buildDashboardMailActionButtonsMarkup(mail, {
+                    allowArchive: section.allow_archive_action,
+                    allowComplete: section.allow_complete_action,
+                    allowRestore: section.allow_restore_action,
+                });
                 return `
-                    <article class="dashboard-thread-card">
-                        <div class="dashboard-thread-card-head">
-                            <div class="dashboard-thread-topline">
-                                <span class="dashboard-thread-sender">${escapeHtml(thread.latest_sender || "-")}</span>
-                                <span class="dashboard-thread-separator">&middot;</span>
-                                <span class="dashboard-thread-time">${escapeHtml(receivedText)}</span>
+                    <div
+                        class="${buttonClass}"
+                        role="button"
+                        tabindex="0"
+                        onclick="window.selectDashboardMail(${Number(mail.id || 0)})"
+                        onkeydown="window.handleDashboardMailCardKey(event, ${Number(mail.id || 0)})">
+                        <div class="dashboard-mail-card-main">
+                            <div class="dashboard-mail-card-copy">
+                                <div class="dashboard-mail-meta">${buildDashboardMailListMeta(mail)}</div>
+                                <div class="dashboard-mail-subject">${escapeHtml(mail.subject || "(제목 없음)")}</div>
+                                <p class="dashboard-mail-summary">${escapeHtml(mail.summary || mail.preview || "-")}</p>
                             </div>
+                            ${actionButtons ? `<div class="dashboard-mail-card-actions">${actionButtons}</div>` : ""}
                         </div>
-
-                        <div class="dashboard-thread-title-row">
-                            <p class="dashboard-thread-title">${escapeHtml(subjectText)}</p>
-                        </div>
-
-                        ${summaryMarkup}
-                        ${captionMarkup}
-
-                        <div class="dashboard-thread-footer">
-                            <div class="dashboard-thread-stat-group">
-                                ${dueText ? `<span class="dashboard-thread-stat is-due">${escapeHtml(dueText)}</span>` : ""}
-                            </div>
-                            <div class="dashboard-thread-stat-group">
-                                <span class="dashboard-thread-stat">메일 ${escapeHtml(String(thread.mail_count || 0))}통</span>
-                                <span class="dashboard-thread-stat">액션 ${Number(actionCount || 0)}개</span>
-                            </div>
-                        </div>
-                    </article>
+                    </div>
                 `;
             })
             .join("");
-        renderDashboardPagination();
+    }
+
+    function handleDashboardMailCardKey(event, mailId) {
+        if (!event) return;
+        if (event.key !== "Enter" && event.key !== " ") {
+            return;
+        }
+        event.preventDefault();
+        selectDashboardMail(mailId);
+    }
+
+    function renderDashboardMailDetailHeader(mail) {
+        const container = getElement("priority-thread-detail-toolbar");
+        if (!container) return;
+        const section = state.dashboardSection || DEFAULT_DASHBOARD_SECTIONS.dashboard;
+
+        if (!mail) {
+            container.innerHTML = `
+                <button type="button" class="dashboard-mail-back-button" onclick="window.showDashboardMailList()">
+                    <span aria-hidden="true">←</span>
+                    <span>뒤로가기</span>
+                </button>
+            `;
+            return;
+        }
+
+        const actionButtons = buildDashboardMailActionButtonsMarkup(mail, {
+            allowArchive: section.allow_archive_action,
+            allowComplete: section.allow_complete_action,
+            allowRestore: section.allow_restore_action,
+        });
+        container.innerHTML = `
+            <div class="dashboard-mail-detail-toolbar-main">
+                <div class="dashboard-mail-detail-toolbar-leading">
+                    <button type="button" class="dashboard-mail-back-button" onclick="window.showDashboardMailList()">
+                        <span aria-hidden="true">←</span>
+                        <span>뒤로가기</span>
+                    </button>
+                    <div class="dashboard-mail-detail-toolbar-copy">
+                        <div class="dashboard-mail-detail-toolbar-kicker">${escapeHtml(section.detail_kicker || "Mail Summary")}</div>
+                        <div class="dashboard-mail-detail-toolbar-title">${escapeHtml(section.detail_title || "선택한 메일의 핵심 내용만 빠르게 확인합니다.")}</div>
+                    </div>
+                </div>
+                ${actionButtons ? `<div class="dashboard-mail-detail-toolbar-actions">${actionButtons}</div>` : ""}
+            </div>
+        `;
+    }
+
+    function renderDashboardMailSummary() {
+        const container = getElement("dashboard-mail-summary-container");
+        if (!container) return;
+
+        const mail = getSelectedDashboardMail();
+        renderDashboardMailDetailHeader(mail);
+        if (!mail) {
+            container.innerHTML = '<div class="dashboard-empty-state">요약할 메일이 없습니다.</div>';
+            return;
+        }
+
+        const attachments = Array.isArray(mail.attachments) ? mail.attachments.filter(Boolean) : [];
+        const summaryLines = buildDashboardSummaryLines(mail);
+        const detailLead = summaryLines[0] || mail.summary || mail.preview || "-";
+        const detailCategoryClass = getDashboardMailCategoryClass(mail);
+        const metaBits = [];
+        if (mail.sender || mail.sender_email) {
+            metaBits.push(`보낸 사람 ${escapeHtml(mail.sender || mail.sender_email || "-")}`);
+        }
+        if (mail.received_at) {
+            metaBits.push(escapeHtml(formatReadableDate(mail.received_at || "", { includeTime: true })));
+        }
+        if (mail.recipient_role && mail.recipient_role !== "NONE") {
+            metaBits.push(escapeHtml(localizeDashboardRecipientRole(mail.recipient_role)));
+        }
+        const dueMarkup = mail.due_date
+            ? `<div class="dashboard-mail-detail-due">기한 ${escapeHtml(formatReadableDate(mail.due_date, { includeTime: true }))}</div>`
+            : "";
+
+        container.innerHTML = `
+            <div class="dashboard-mail-detail-shell ${detailCategoryClass}">
+                <div class="dashboard-mail-detail-hero">
+                    <h5 class="dashboard-mail-detail-title">${escapeHtml(mail.subject || "(제목 없음)")}</h5>
+                    <div class="dashboard-mail-detail-meta">
+                        ${metaBits.map((item) => `<span>${item}</span>`).join("")}
+                    </div>
+                    ${dueMarkup}
+                </div>
+
+                <div class="dashboard-mail-detail-card">
+                    <div class="dashboard-mail-detail-card-title">한 줄 요약</div>
+                    <p class="dashboard-mail-detail-body">${escapeHtml(detailLead)}</p>
+                </div>
+
+                ${summaryLines.length > 1 ? `
+                    <div class="dashboard-mail-detail-card">
+                        <div class="dashboard-mail-detail-card-title">핵심 내용</div>
+                        <div class="dashboard-mail-detail-list">
+                            ${summaryLines.slice(1).map((item, index) => `
+                                <div class="dashboard-mail-detail-item">
+                                    <span class="dashboard-mail-detail-item-index">${index + 1}</span>
+                                    <p class="dashboard-mail-detail-item-text">${escapeHtml(item)}</p>
+                                </div>
+                            `).join("")}
+                        </div>
+                    </div>
+                ` : ""}
+
+                ${attachments.length > 0 ? `
+                    <div class="dashboard-mail-detail-card">
+                        <div class="dashboard-mail-detail-card-title">첨부파일</div>
+                        <div class="dashboard-mail-detail-attachments">
+                            ${attachments.map((item) => `<span class="dashboard-mail-detail-attachment">${escapeHtml(item)}</span>`).join("")}
+                        </div>
+                    </div>
+                ` : ""}
+            </div>
+        `;
     }
 
     function renderDashboard(args) {
         getElement("view-dashboard").classList.add("active");
         const scrollPositions = captureDashboardScrollPositions();
+        const pageId = getDashboardPageId(resolvePageId(args));
 
         state.syncStatus = args.sync_status && typeof args.sync_status === "object" ? args.sync_status : {};
         state.syncProgress = args.sync_progress && typeof args.sync_progress === "object"
             ? args.sync_progress
             : state.syncProgress;
-        state.dashboardThreads = Array.isArray(args.priority_threads) ? args.priority_threads : [];
-        state.dashboardThreadFilterCounts = args.dashboard_thread_filter_counts && typeof args.dashboard_thread_filter_counts === "object"
+        state.dashboardSection = resolveDashboardSection(args.dashboard_section, pageId);
+        state.classifiedMails = Array.isArray(args.classified_mails) ? args.classified_mails : [];
+        state.dashboardMailCategoryCounts = args.dashboard_mail_category_counts && typeof args.dashboard_mail_category_counts === "object"
             ? {
-                all: Number(args.dashboard_thread_filter_counts.all || 0),
-                today: Number(args.dashboard_thread_filter_counts.today || 0),
-                reply: Number(args.dashboard_thread_filter_counts.reply || 0),
-                approval: Number(args.dashboard_thread_filter_counts.approval || 0),
-                waiting: Number(args.dashboard_thread_filter_counts.waiting || 0),
-                review: Number(args.dashboard_thread_filter_counts.review || 0),
+                category_1: Number(args.dashboard_mail_category_counts.category_1 || 0),
+                category_2: Number(args.dashboard_mail_category_counts.category_2 || 0),
+                category_3: Number(args.dashboard_mail_category_counts.category_3 || 0),
             }
-            : { all: state.dashboardThreads.length, today: 0, reply: 0, approval: 0, waiting: 0, review: 0 };
-        state.dashboardThreadPagination = args.dashboard_thread_pagination && typeof args.dashboard_thread_pagination === "object"
-            ? {
-                page: Number(args.dashboard_thread_pagination.page || 1),
-                page_size: Number(args.dashboard_thread_pagination.page_size || 10),
-                total_items: Number(args.dashboard_thread_pagination.total_items || 0),
-                total_pages: Number(args.dashboard_thread_pagination.total_pages || 1),
-                start_item: Number(args.dashboard_thread_pagination.start_item || 0),
-                end_item: Number(args.dashboard_thread_pagination.end_item || 0),
-                has_previous: Boolean(args.dashboard_thread_pagination.has_previous),
-                has_next: Boolean(args.dashboard_thread_pagination.has_next),
-            }
-            : {
-                page: 1,
-                page_size: 10,
-                total_items: state.dashboardThreads.length,
-                total_pages: state.dashboardThreads.length > 0 ? Math.ceil(state.dashboardThreads.length / 10) : 1,
-                start_item: state.dashboardThreads.length > 0 ? 1 : 0,
-                end_item: state.dashboardThreads.length,
-                has_previous: false,
-                has_next: false,
-            };
-        state.dashboardThreadPage = Number(state.dashboardThreadPagination.page || 1);
-        if (typeof args.dashboard_thread_filter === "string" && args.dashboard_thread_filter) {
-            state.dashboardThreadFilter = args.dashboard_thread_filter;
+            : { category_1: 0, category_2: 0, category_3: 0 };
+        if (typeof args.dashboard_mail_tab === "string" && args.dashboard_mail_tab) {
+            state.dashboardMailTab = args.dashboard_mail_tab;
         }
-        if (!["all", "today", "reply", "approval", "waiting", "review"].includes(state.dashboardThreadFilter)) {
-            state.dashboardThreadFilter = "all";
+        state.dashboardMailTab = resolveDashboardMailTabWithCounts(state.dashboardMailTab);
+        if (typeof args.dashboard_mail_view === "string" && args.dashboard_mail_view) {
+            state.dashboardMailView = args.dashboard_mail_view === "detail" ? "detail" : "list";
         }
 
-        const tasks = Array.isArray(args.tasks) ? args.tasks : [];
-        const completedTasks = Array.isArray(args.completed_tasks) ? args.completed_tasks : [];
+        const visibleMails = getFilteredDashboardMails();
+        const requestedMailId = Number(args.selected_mail_id || 0);
+        state.selectedMailId = requestedMailId || Number(state.selectedMailId || 0);
+        if (!visibleMails.some((mail) => Number(mail.id || 0) === Number(state.selectedMailId || 0))) {
+            state.selectedMailId = visibleMails.length > 0 ? Number(visibleMails[0].id || 0) : 0;
+        }
+        if (!visibleMails.length) {
+            state.dashboardMailView = "list";
+        } else if (state.dashboardMailView === "detail" && !state.selectedMailId) {
+            state.dashboardMailView = "list";
+        }
 
         renderSyncButton();
+        renderDashboardPageCopy();
         renderDashboardSyncStatusStrip(state.syncStatus);
         renderDashboardFilterBar();
         renderDashboardThreadList();
         renderDashboardThreadPane();
-        renderDashboardTaskPanels(tasks, completedTasks);
+        renderDashboardListDetailMode();
+        renderDashboardMailSummary();
         restoreDashboardScrollPositions(scrollPositions);
         syncDashboardPolling();
-
-        const requestedTab = args.task_tab === "completed" ? "completed" : args.task_tab === "open" ? "open" : "";
-        if (requestedTab) {
-            state.dashboardTaskTab = requestedTab;
-        } else if (state.dashboardTaskTab === "open" && tasks.length === 0 && completedTasks.length > 0) {
-            state.dashboardTaskTab = "completed";
-        } else if (state.dashboardTaskTab === "completed" && completedTasks.length === 0 && tasks.length > 0) {
-            state.dashboardTaskTab = "open";
-        }
-        switchTaskTab(state.dashboardTaskTab);
     }
 
     function handleRender(args) {
@@ -2548,7 +2812,7 @@
         renderThemeToggle();
         showFlash(safeArgs.flash_msg);
 
-        if (pageId === "dashboard") {
+        if (DASHBOARD_PAGE_IDS.includes(pageId)) {
             renderDashboard(safeArgs);
             return;
         }
@@ -2580,10 +2844,11 @@
     window.setThemeMode = setThemeMode;
     window.syncMail = syncMail;
     window.navigate = navigate;
-    window.toggleTask = toggleTask;
-    window.switchTaskTab = switchTaskTab;
-    window.setDashboardThreadFilter = setDashboardThreadFilter;
-    window.setDashboardThreadPage = setDashboardThreadPage;
+    window.setDashboardMailTab = setDashboardMailTab;
+    window.selectDashboardMail = selectDashboardMail;
+    window.handleDashboardMailCollectionAction = handleDashboardMailCollectionAction;
+    window.showDashboardMailList = showDashboardMailList;
+    window.handleDashboardMailCardKey = handleDashboardMailCardKey;
     window.clearSecret = clearSecret;
     window.handleAiProviderChange = handleAiProviderChange;
     window.testMailbox = testMailbox;
