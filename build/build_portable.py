@@ -44,24 +44,27 @@ def _create_clean_config_dir() -> Path:
     return temp_root
 
 
-def _stage_release_folder(root: Path, executable_path: Path) -> Path:
-    """Create a timestamped release folder with the packaged executable only."""
+def _stage_release_folder(root: Path, bundle_dir: Path) -> Path:
+    """Create a timestamped release folder with the packaged onedir bundle."""
 
     release_root = root / "release"
     release_root.mkdir(parents=True, exist_ok=True)
     release_dir = release_root / f"MailAI_Portable_Deploy_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     release_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(executable_path, release_dir / executable_path.name)
+    target_dir = release_dir / bundle_dir.name
+    shutil.copytree(bundle_dir, target_dir, dirs_exist_ok=True)
     return release_dir
 
 
-def _cleanup_legacy_dist_folder(root: Path) -> None:
-    legacy_dist_dir = root / "dist" / "MailAI_Portable"
-    if legacy_dist_dir.exists():
-        shutil.rmtree(legacy_dist_dir, ignore_errors=True)
-    legacy_executable = root / "dist" / "HL-Mail.exe"
-    if legacy_executable.exists():
-        legacy_executable.unlink(missing_ok=True)
+def _cleanup_previous_build_outputs(root: Path) -> None:
+    bundle_dir = root / "dist" / "MailAI_Portable"
+    if bundle_dir.exists():
+        shutil.rmtree(bundle_dir, ignore_errors=True)
+
+    for executable_name in ["MailAI_Portable.exe", "HL-Mail.exe"]:
+        executable_path = root / "dist" / executable_name
+        if executable_path.exists():
+            executable_path.unlink(missing_ok=True)
 
 
 def _append_add_data_args(
@@ -92,7 +95,7 @@ def _build_pyinstaller_command(root: Path, entrypoint: Path, clean_config_root: 
         "PyInstaller",
         "--noconfirm",
         "--clean",
-        "--onefile",
+        "--onedir",
         "--windowed",
         "--name",
         "MailAI_Portable",
@@ -139,12 +142,11 @@ def main() -> int:
     clean_config_root = _create_clean_config_dir()
     command = _build_pyinstaller_command(root, entrypoint, clean_config_root)
     try:
-        _cleanup_legacy_dist_folder(root)
+        _cleanup_previous_build_outputs(root)
         result = subprocess.call(command, cwd=root)
         if result == 0:
-            _cleanup_legacy_dist_folder(root)
-            executable_path = root / "dist" / "MailAI_Portable.exe"
-            release_dir = _stage_release_folder(root, executable_path)
+            bundle_dir = root / "dist" / "MailAI_Portable"
+            release_dir = _stage_release_folder(root, bundle_dir)
             print(f"Release folder created at: {release_dir}")
         return result
     finally:

@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
-from streamlit.web import bootstrap
 from app.runtime_context import build_app_context
 from app.ui.desktop_bridge import DesktopApi
 
@@ -560,6 +559,8 @@ def _build_tray_icon_image(size: int = 64) -> Any:
 
 
 def _run_streamlit_server(runtime: DesktopRuntime, port: int) -> int:
+    from streamlit.web import bootstrap
+
     flag_options = _streamlit_flag_options(port)
     bootstrap.load_config_options(flag_options=flag_options)
     bootstrap.run(
