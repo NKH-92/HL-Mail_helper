@@ -174,6 +174,74 @@ class AnalysisServiceTests(unittest.TestCase):
         self.assertTrue(audit["validator_applied"])
         self.assertEqual(len(gemini_client.calls), 2)
 
+    def test_validation_pass_applies_deadline_only_correction(self) -> None:
+        config = AppConfig(
+            user_email="user@example.com",
+            user_display_name="Tester",
+            user_job_title="Lead",
+            store_raw_body=True,
+            preview_max_chars=4000,
+        )
+        first_pass = {
+            "request_present": True,
+            "request_target": "me",
+            "request_target_is_me": True,
+            "action_types": ["REPLY"],
+            "deadline": {"raw": "next Friday 5pm", "iso": "2026-03-27 17:00:00"},
+            "urgency": "high",
+            "llm_category": 1,
+            "evidence": ["Please reply by next Friday 5pm."],
+            "summary": "Reply by next Friday",
+            "confidence": 0.62,
+        }
+        validator_pass = {
+            "is_valid": False,
+            "corrected_result": {
+                "request_present": True,
+                "request_target": "me",
+                "request_target_is_me": True,
+                "action_types": ["REPLY"],
+                "deadline": {"raw": "close of business next Friday", "iso": "2026-03-27 17:00:00"},
+                "urgency": "high",
+                "llm_category": 1,
+                "final_category": 1,
+                "evidence": ["Please reply by next Friday 5pm."],
+                "summary": "Reply by next Friday",
+                "confidence": 0.62,
+            },
+            "issues": ["Normalized the raw deadline wording."],
+        }
+        gemini_client = _FakeGeminiClient([first_pass, validator_pass])
+        service = AnalysisService(
+            config_manager=_FakeConfigManager(config),
+            address_book_service=_FakeAddressBookService(),
+            prompt_manager=_FakePromptManager(),
+            gemini_client=gemini_client,
+            mail_repository=_FakeMailRepository(),
+            logger=logging.getLogger("test"),
+        )
+        mail = _make_mail(body_text="Please reply by next Friday 5pm.")
+        rule_result = build_rule_result(
+            user_email=config.user_email,
+            sender_email=mail.sender_email,
+            to_list=mail.to_list,
+            cc_list=mail.cc_list,
+            subject=mail.subject,
+            body_text=mail.body_text,
+            thread_id=mail.thread_key,
+            message_id=mail.message_id,
+        )
+
+        result, audit = service._analyze_mail(config, mail, rule_result=rule_result)
+
+        self.assertTrue(result.request_present)
+        self.assertEqual(result.due_date, "2026-03-27 17:00:00")
+        self.assertTrue(audit["validator_used"])
+        self.assertTrue(audit["validator_applied"])
+        self.assertEqual(audit["validator_deadline_raw"], "close of business next Friday")
+        self.assertEqual(audit["final_deadline_raw"], "close of business next Friday")
+        self.assertEqual(len(gemini_client.calls), 2)
+
     def test_validation_pass_is_skipped_for_high_confidence_clear_mail(self) -> None:
         config = AppConfig(
             user_email="user@example.com",

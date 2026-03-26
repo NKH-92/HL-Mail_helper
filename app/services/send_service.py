@@ -7,7 +7,7 @@ from calendar import monthrange
 from datetime import datetime, timedelta
 
 from app.core.config_manager import ConfigManager
-from app.core.security import mask_sensitive_text
+from app.core.security import MAIL_PASSWORD_KEY, mask_sensitive_text
 from app.core.time_utils import combine_date_and_time, parse_datetime_text, parse_time_text
 from app.db.models import SendTemplate
 from app.db.repositories import SendLogRepository, TemplateRepository, now_iso
@@ -33,6 +33,18 @@ class SendService:
         self.send_log_repository = send_log_repository
         self.logger = logger
 
+    def get_unavailability_reason(self) -> str | None:
+        """Return a user-facing reason when SMTP delivery cannot run."""
+
+        config = self.config_manager.load()
+        if not config.user_email.strip():
+            return "메일 주소가 설정되지 않아 자동발송을 실행할 수 없습니다."
+        if not config.smtp_host.strip():
+            return "SMTP 서버가 설정되지 않아 자동발송을 실행할 수 없습니다."
+        if not self.smtp_client.secret_store.has_secret(MAIL_PASSWORD_KEY):
+            return "메일 비밀번호가 저장되지 않아 자동발송을 실행할 수 없습니다."
+        return None
+
     def send_test_template(self, template: SendTemplate) -> tuple[bool, str]:
         """Send a template immediately."""
 
@@ -40,6 +52,11 @@ class SendService:
         recipients = template.to_list + template.cc_list
         if not template.to_list:
             return False, "받는 사람(To)을 한 명 이상 입력해 주세요."
+        unavailable_reason = self.get_unavailability_reason()
+        if unavailable_reason:
+            self.send_log_repository.create(template.id, "failed", recipients, template.subject, unavailable_reason)
+            self.logger.warning("Test send skipped: %s", unavailable_reason)
+            return False, unavailable_reason
         try:
             self.smtp_client.send_mail(
                 config=config,
@@ -73,6 +90,11 @@ class SendService:
             self.logger.warning("Scheduled template %s is missing To recipients", template_id)
             return self._next_retry_at()
 
+        unavailable_reason = self.get_unavailability_reason()
+        if unavailable_reason:
+            self.send_log_repository.create(template_id, "failed", recipients, template.subject, unavailable_reason)
+            self.logger.warning("Scheduled template %s skipped: %s", template_id, unavailable_reason)
+            return self._next_retry_at()
         try:
             config = self.config_manager.load()
             self.smtp_client.send_mail(

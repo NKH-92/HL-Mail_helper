@@ -24,8 +24,8 @@ from app.ui.page_config import (
     normalize_page as _normalize_page,
     resolve_page_id,
 )
+from app.ui.settings_ops import apply_settings_update
 from app.ui.ui_state_helpers import (
-    build_follow_up_mail_template,
     build_classified_mail_dicts,
     build_dashboard_mail_category_counts,
     build_dashboard_mail_page_context,
@@ -383,24 +383,26 @@ class DesktopApi:
             return
 
         if action == "save_settings":
+            current_config = self.context.config_manager.load()
             next_config, pwd, api_key, hanlim_api_key = build_settings_submission(
-                self.context.config_manager.load(),
+                current_config,
                 payload,
             )
             next_config = self.context.address_book_service.merge_config_profile(next_config)
-            self.context.config_manager.save(next_config)
-            deleted_old_count = self.context.sync_service.prune_local_mail_retention(days=next_config.sync_days)
-            self.context.scheduler_manager.refresh_jobs()
-            if pwd:
-                self.context.secret_store.set_secret(MAIL_PASSWORD_KEY, pwd)
-            if api_key:
-                self.context.secret_store.set_secret(GEMINI_API_KEY, api_key)
-            if hanlim_api_key:
-                self.context.secret_store.set_secret(HANLIM_API_KEY, hanlim_api_key)
+            deleted_old_count, follow_up_warning = apply_settings_update(
+                self.context,
+                current_config,
+                next_config,
+                password=pwd,
+                api_key=api_key,
+                hanlim_api_key=hanlim_api_key,
+            )
 
             flash_message = "설정을 저장했습니다."
             if deleted_old_count:
                 flash_message += f" 보관 기간을 벗어난 메일 {deleted_old_count}건을 정리했습니다."
+            if follow_up_warning:
+                flash_message += f" {follow_up_warning}"
             self.state.flash_message = flash_message
             return
 
@@ -428,6 +430,7 @@ class DesktopApi:
             secret_type = str(payload.get("type") or "").strip()
             if secret_type == "password":
                 self.context.secret_store.delete_secret(MAIL_PASSWORD_KEY)
+                self.context.scheduler_manager.refresh_jobs()
             elif secret_type == "api_key":
                 self.context.secret_store.delete_secret(GEMINI_API_KEY)
             elif secret_type == "hanlim_api_key":
@@ -478,8 +481,24 @@ class DesktopApi:
                     raise ValueError("\n".join(validation_errors))
                 saved_id = self.context.template_service.save_template(registration)
                 self.state.selected_send_registration_id = saved_id
-                self.context.scheduler_manager.refresh_jobs()
-                self.state.flash_message = "발송 등록을 저장했습니다."
+                refresh_warning = ""
+                try:
+                    self.context.scheduler_manager.refresh_jobs()
+                except Exception as exc:  # noqa: BLE001
+                    refresh_warning = mask_sensitive_text(str(exc))
+                    self.context.logger.exception("Autosend refresh failed after save: %s", exc)
+                send_warning = ""
+                try:
+                    send_warning = self.context.send_service.get_unavailability_reason() or ""
+                except Exception as exc:  # noqa: BLE001
+                    send_warning = f"자동발송 상태 확인에 실패했습니다: {mask_sensitive_text(str(exc))}"
+                    self.context.logger.exception("Autosend availability probe failed after save: %s", exc)
+                message_parts = ["발송 등록을 저장했습니다."]
+                if send_warning:
+                    message_parts.append(send_warning)
+                if refresh_warning:
+                    message_parts.append(f"스케줄 갱신에 실패했습니다: {refresh_warning}")
+                self.state.flash_message = " ".join(message_parts)
             except Exception as exc:  # noqa: BLE001
                 self.state.flash_message = f"저장에 실패했습니다: {exc}"
             return
@@ -494,48 +513,6 @@ class DesktopApi:
                 self.state.flash_message = message if ok else message
             except Exception as exc:  # noqa: BLE001
                 self.state.flash_message = f"테스트 발송에 실패했습니다: {exc}"
-            return
-
-        if action == "mark_thread_done":
-            thread_key = str(payload.get("thread_key") or "").strip().lower()
-            if thread_key:
-                updated_count = self.context.mail_repository.mark_thread_done(thread_key)
-                self.state.flash_message = (
-                    f"스레드의 메일 {updated_count}건과 내 액션을 완료 처리했습니다."
-                    if updated_count
-                    else "완료 처리할 스레드를 찾지 못했습니다."
-                )
-            return
-
-        if action == "create_follow_up_draft":
-            thread_key = str(payload.get("thread_key") or "").strip().lower()
-            if not thread_key:
-                return
-            config = self.context.address_book_service.merge_config_profile(self.context.config_manager.load())
-            thread = next(
-                (
-                    item
-                    for item in self.context.mail_repository.list_thread_overviews(user_email=config.user_email)
-                    if str(item.thread_key or "").strip().lower() == thread_key
-                ),
-                None,
-            )
-            if thread is None:
-                self.state.flash_message = "선택한 스레드를 찾지 못했습니다."
-                return
-            thread_mails = self.context.mail_repository.list_thread_mails_by_keys(
-                [thread_key],
-                limit_per_thread=None,
-            ).get(thread_key, [])
-            draft = build_follow_up_mail_template(
-                thread,
-                thread_mails,
-                current_user_email=config.user_email,
-                current_user_name=config.user_display_name,
-            )
-            saved_id = self.context.mail_template_service.save_template(draft)
-            self.state.selected_mail_template_id = saved_id
-            self.state.flash_message = "후속 초안을 자동발송 화면에 준비했습니다."
             return
 
         if action == "scheduler_cmd":

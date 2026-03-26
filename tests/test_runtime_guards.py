@@ -121,9 +121,10 @@ class _FakeConfigManager:
 
 
 class _FakeSmtpClient:
-    def __init__(self, should_fail: bool = False) -> None:
+    def __init__(self, should_fail: bool = False, *, has_secret: bool = True) -> None:
         self.should_fail = should_fail
         self.sent_messages: list[dict[str, object]] = []
+        self.secret_store = SimpleNamespace(has_secret=lambda key: has_secret)
 
     def send_mail(self, **kwargs) -> None:
         if self.should_fail:
@@ -176,9 +177,22 @@ class _FakeSendLogRepository:
 class _FakeScheduler:
     def __init__(self) -> None:
         self.added_jobs: list[tuple[tuple, dict]] = []
+        self._jobs: dict[str, SimpleNamespace] = {}
 
     def add_job(self, *args, **kwargs) -> None:
         self.added_jobs.append((args, kwargs))
+        job_id = kwargs.get("id")
+        if job_id:
+            self._jobs[str(job_id)] = SimpleNamespace(id=str(job_id), next_run_time=None)
+
+    def get_jobs(self) -> list[SimpleNamespace]:
+        return list(self._jobs.values())
+
+    def get_job(self, job_id: str) -> SimpleNamespace | None:
+        return self._jobs.get(job_id)
+
+    def remove_job(self, job_id: str) -> None:
+        self._jobs.pop(job_id, None)
 
 
 class _NoopMailboxService:
@@ -205,6 +219,49 @@ class _RetryingSendService:
 
     def send_scheduled_template(self, template_id: int) -> datetime | None:
         return self.retry_at
+
+    def calculate_next_run(self, template: SendTemplate, after: datetime | None = None) -> datetime | None:
+        self.calculate_next_run_called = True
+        return after
+
+
+class _UnavailableSendService:
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        self.calculate_next_run_called = False
+
+    def get_unavailability_reason(self) -> str | None:
+        return self.reason
+
+    def calculate_next_run(self, template: SendTemplate, after: datetime | None = None) -> datetime | None:
+        self.calculate_next_run_called = True
+        return after
+
+
+class _UnavailableRetryingSendService(_UnavailableSendService):
+    def __init__(self, reason: str, retry_at: datetime) -> None:
+        super().__init__(reason)
+        self.retry_at = retry_at
+
+    def send_scheduled_template(self, template_id: int) -> datetime | None:
+        return self.retry_at
+
+
+class _ExplodingAvailabilitySendService:
+    def get_unavailability_reason(self) -> str | None:
+        raise RuntimeError("boom")
+
+
+class _ExplodingPostSendAvailabilityService:
+    def __init__(self, retry_at: datetime) -> None:
+        self.retry_at = retry_at
+        self.calculate_next_run_called = False
+
+    def send_scheduled_template(self, template_id: int) -> datetime | None:
+        return self.retry_at
+
+    def get_unavailability_reason(self) -> str | None:
+        raise RuntimeError("boom")
 
     def calculate_next_run(self, template: SendTemplate, after: datetime | None = None) -> datetime | None:
         self.calculate_next_run_called = True
@@ -387,6 +444,38 @@ class SchedulingTests(unittest.TestCase):
         self.assertEqual(template_repository.enabled_updates, [False])
         self.assertEqual(len(smtp_client.sent_messages), 1)
 
+    def test_test_send_reports_missing_password_before_smtp_attempt(self) -> None:
+        template = SendTemplate(
+            id=14,
+            template_name="one-shot",
+            subject="subject",
+            body="body",
+            to_list=["to@example.com"],
+            cc_list=[],
+            attachment_paths=[],
+            repeat_type="none",
+            send_time="09:00",
+            first_send_at="2026-03-09 09:00:00",
+            enabled=True,
+        )
+        template_repository = _FakeTemplateRepository(template)
+        send_log_repository = _FakeSendLogRepository()
+        smtp_client = _FakeSmtpClient(has_secret=False)
+        service = SendService(
+            _FakeConfigManager(),
+            smtp_client,
+            template_repository,
+            send_log_repository,
+            logging.getLogger("test"),
+        )
+
+        ok, message = service.send_test_template(template)
+
+        self.assertFalse(ok)
+        self.assertEqual(len(smtp_client.sent_messages), 0)
+        self.assertIn("메일 비밀번호", message)
+        self.assertEqual(send_log_repository.entries[0][1], "failed")
+
     def test_one_shot_scheduled_template_is_disabled_after_failure(self) -> None:
         template = SendTemplate(
             id=11,
@@ -488,6 +577,131 @@ class SchedulingTests(unittest.TestCase):
         self.assertEqual(kwargs["id"], "template_13")
         self.assertEqual(kwargs["args"], [template.id])
         self.assertEqual(kwargs["trigger"].run_date.replace(tzinfo=None), retry_at)
+
+    def test_scheduler_skips_template_jobs_when_send_is_unavailable(self) -> None:
+        template = SendTemplate(
+            id=15,
+            template_name="daily",
+            subject="subject",
+            body="body",
+            to_list=["to@example.com"],
+            cc_list=[],
+            attachment_paths=[],
+            repeat_type="daily",
+            send_time="09:00",
+            first_send_at="2026-03-09 09:00:00",
+            enabled=True,
+        )
+        template_repository = _FakeTemplateRepository(template)
+        send_service = _UnavailableSendService("메일 비밀번호가 저장되지 않아 자동발송을 실행할 수 없습니다.")
+        manager = SchedulerManager(
+            SimpleNamespace(load=lambda: AppConfig(sync_interval_minutes=60)),
+            template_repository,
+            send_service,
+            _NoopMailboxService(),
+            logging.getLogger("test"),
+        )
+        manager.scheduler = _FakeScheduler()
+
+        manager.refresh_jobs()
+
+        self.assertFalse(send_service.calculate_next_run_called)
+        self.assertEqual(len(manager.scheduler.added_jobs), 1)
+        _, kwargs = manager.scheduler.added_jobs[0]
+        self.assertEqual(kwargs["id"], "mailbox_interval")
+
+    def test_scheduler_clears_existing_template_jobs_when_availability_probe_fails(self) -> None:
+        template = SendTemplate(
+            id=17,
+            template_name="daily",
+            subject="subject",
+            body="body",
+            to_list=["to@example.com"],
+            cc_list=[],
+            attachment_paths=[],
+            repeat_type="daily",
+            send_time="09:00",
+            first_send_at="2026-03-09 09:00:00",
+            enabled=True,
+        )
+        template_repository = _FakeTemplateRepository(template)
+        manager = SchedulerManager(
+            SimpleNamespace(load=lambda: AppConfig(sync_interval_minutes=60)),
+            template_repository,
+            _ExplodingAvailabilitySendService(),
+            _NoopMailboxService(),
+            logging.getLogger("test"),
+        )
+        manager.scheduler = _FakeScheduler()
+        manager.scheduler.add_job(lambda: None, id="template_17")
+
+        manager.refresh_jobs()
+
+        self.assertIsNone(manager.scheduler.get_job("template_17"))
+        self.assertEqual(manager.scheduler.added_jobs[-1][1]["id"], "mailbox_interval")
+
+    def test_scheduler_does_not_reschedule_retry_when_send_becomes_unavailable(self) -> None:
+        template = SendTemplate(
+            id=16,
+            template_name="daily",
+            subject="subject",
+            body="body",
+            to_list=["to@example.com"],
+            cc_list=[],
+            attachment_paths=[],
+            repeat_type="daily",
+            send_time="09:00",
+            first_send_at="2026-03-09 09:00:00",
+            enabled=True,
+        )
+        template_repository = _FakeTemplateRepository(template)
+        send_service = _UnavailableRetryingSendService(
+            "메일 비밀번호가 저장되지 않아 자동발송을 실행할 수 없습니다.",
+            datetime(2026, 3, 10, 9, 5, 0),
+        )
+        manager = SchedulerManager(
+            SimpleNamespace(load=lambda: AppConfig(sync_interval_minutes=60)),
+            template_repository,
+            send_service,
+            _NoopMailboxService(),
+            logging.getLogger("test"),
+        )
+        manager.scheduler = _FakeScheduler()
+
+        manager._run_template_job(template.id)
+
+        self.assertFalse(send_service.calculate_next_run_called)
+        self.assertEqual(manager.scheduler.added_jobs, [])
+
+    def test_scheduler_does_not_raise_when_post_send_availability_probe_fails(self) -> None:
+        template = SendTemplate(
+            id=18,
+            template_name="daily",
+            subject="subject",
+            body="body",
+            to_list=["to@example.com"],
+            cc_list=[],
+            attachment_paths=[],
+            repeat_type="daily",
+            send_time="09:00",
+            first_send_at="2026-03-09 09:00:00",
+            enabled=True,
+        )
+        template_repository = _FakeTemplateRepository(template)
+        send_service = _ExplodingPostSendAvailabilityService(datetime(2026, 3, 10, 9, 5, 0))
+        manager = SchedulerManager(
+            SimpleNamespace(load=lambda: AppConfig(sync_interval_minutes=60)),
+            template_repository,
+            send_service,
+            _NoopMailboxService(),
+            logging.getLogger("test"),
+        )
+        manager.scheduler = _FakeScheduler()
+
+        manager._run_template_job(template.id)
+
+        self.assertFalse(send_service.calculate_next_run_called)
+        self.assertEqual(manager.scheduler.added_jobs, [])
 
     def test_scheduler_serializes_manual_and_background_mailbox_cycles(self) -> None:
         started = Event()

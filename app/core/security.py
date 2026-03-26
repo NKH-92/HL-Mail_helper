@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import importlib
 import re
-
-import keyring
 
 SERVICE_NAME = "MailAI_Portable"
 MAIL_PASSWORD_KEY = "mail_password"
 GEMINI_API_KEY = "gemini_api_key"
 HANLIM_API_KEY = "hanlim_api_key"
+
+
+def _keyring_module():
+    """Import keyring lazily so non-secret code paths don't block at module import time."""
+
+    return importlib.import_module("keyring")
 
 
 class SecretStore:
@@ -21,12 +26,12 @@ class SecretStore:
     def set_secret(self, key: str, value: str) -> None:
         """Store a secret in the keyring."""
 
-        keyring.set_password(self.service_name, key, value)
+        _keyring_module().set_password(self.service_name, key, value)
 
     def get_secret(self, key: str) -> str:
         """Read a secret from the keyring."""
 
-        return keyring.get_password(self.service_name, key) or ""
+        return _keyring_module().get_password(self.service_name, key) or ""
 
     def has_secret(self, key: str) -> bool:
         """Return whether a secret is stored for the given key."""
@@ -36,10 +41,14 @@ class SecretStore:
     def delete_secret(self, key: str) -> None:
         """Remove a secret from the keyring when present."""
 
+        keyring_module = _keyring_module()
         try:
-            keyring.delete_password(self.service_name, key)
-        except keyring.errors.PasswordDeleteError:
-            return
+            keyring_module.delete_password(self.service_name, key)
+        except Exception as exc:  # noqa: BLE001
+            delete_error = getattr(getattr(keyring_module, "errors", None), "PasswordDeleteError", None)
+            if delete_error is not None and isinstance(exc, delete_error):
+                return
+            raise
 
 
 def mask_sensitive_text(value: str) -> str:

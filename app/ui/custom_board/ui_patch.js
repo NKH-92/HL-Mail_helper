@@ -2511,6 +2511,41 @@
         return meta.join(' <span class="dashboard-thread-separator">&middot;</span> ');
     }
 
+    function isDashboardMailAnalysisFailed(mail) {
+        return String(mail && mail.analysis_status || "").trim().toLowerCase() === "failed";
+    }
+
+    function buildDashboardMailAnalysisBadge(mail) {
+        if (!isDashboardMailAnalysisFailed(mail)) {
+            return "";
+        }
+        return '<span class="dashboard-priority-pill dashboard-priority-high">AI 재검토 필요</span>';
+    }
+
+    function buildDashboardMailSummaryText(mail) {
+        const summaryText = String((mail && (mail.summary || mail.preview)) || "-").trim() || "-";
+        if (!isDashboardMailAnalysisFailed(mail)) {
+            return summaryText;
+        }
+        return `AI 재검토 필요: ${summaryText}`;
+    }
+
+    function buildDashboardMailAnalysisWarning(mail) {
+        if (!isDashboardMailAnalysisFailed(mail)) {
+            return "";
+        }
+        const errorText = String(mail.analysis_error || "").trim();
+        const message = errorText
+            ? `AI 분석이 실패해 규칙 기반 임시 분류로 표시 중입니다. ${errorText}`
+            : "AI 분석이 실패해 규칙 기반 임시 분류로 표시 중입니다.";
+        return `
+            <div class="dashboard-mail-detail-card">
+                <div class="dashboard-mail-detail-card-title">분류 상태</div>
+                <p class="dashboard-mail-detail-body">${escapeHtml(message)}</p>
+            </div>
+        `;
+    }
+
     function localizeDashboardRecipientRole(value) {
         const normalized = String(value || "").trim().toUpperCase();
         if (normalized === "TO") return "직접 수신";
@@ -2579,6 +2614,7 @@
                 const buttonClass = isSelected
                     ? `dashboard-mail-card ${categoryClass} is-selected`
                     : `dashboard-mail-card ${categoryClass}`;
+                const analysisBadge = buildDashboardMailAnalysisBadge(mail);
                 const actionButtons = buildDashboardMailActionButtonsMarkup(mail, {
                     allowArchive: section.allow_archive_action,
                     allowComplete: section.allow_complete_action,
@@ -2595,7 +2631,8 @@
                             <div class="dashboard-mail-card-copy">
                                 <div class="dashboard-mail-meta">${buildDashboardMailListMeta(mail)}</div>
                                 <div class="dashboard-mail-subject">${escapeHtml(mail.subject || "(제목 없음)")}</div>
-                                <p class="dashboard-mail-summary">${escapeHtml(mail.summary || mail.preview || "-")}</p>
+                                ${analysisBadge ? `<div>${analysisBadge}</div>` : ""}
+                                <p class="dashboard-mail-summary">${escapeHtml(buildDashboardMailSummaryText(mail))}</p>
                             </div>
                             ${actionButtons ? `<div class="dashboard-mail-card-actions">${actionButtons}</div>` : ""}
                         </div>
@@ -2664,8 +2701,9 @@
 
         const attachments = Array.isArray(mail.attachments) ? mail.attachments.filter(Boolean) : [];
         const summaryLines = buildDashboardSummaryLines(mail);
-        const detailLead = summaryLines[0] || mail.summary || mail.preview || "-";
+        const detailLead = summaryLines[0] || buildDashboardMailSummaryText(mail);
         const detailCategoryClass = getDashboardMailCategoryClass(mail);
+        const analysisWarningMarkup = buildDashboardMailAnalysisWarning(mail);
         const metaBits = [];
         if (mail.sender || mail.sender_email) {
             metaBits.push(`보낸 사람 ${escapeHtml(mail.sender || mail.sender_email || "-")}`);
@@ -2689,6 +2727,8 @@
                     </div>
                     ${dueMarkup}
                 </div>
+
+                ${analysisWarningMarkup}
 
                 <div class="dashboard-mail-detail-card">
                     <div class="dashboard-mail-detail-card-title">한 줄 요약</div>
@@ -2844,6 +2884,7 @@
     window.setThemeMode = setThemeMode;
     window.syncMail = syncMail;
     window.navigate = navigate;
+    window.toggleTask = toggleTask;
     window.setDashboardMailTab = setDashboardMailTab;
     window.selectDashboardMail = selectDashboardMail;
     window.handleDashboardMailCollectionAction = handleDashboardMailCollectionAction;

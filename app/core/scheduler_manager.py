@@ -74,15 +74,27 @@ class SchedulerManager:
     def refresh_jobs(self) -> None:
         """Rebuild template jobs without touching mailbox polling jobs."""
 
-        for job in list(self.scheduler.get_jobs()):
-            if job.id.startswith("template_"):
-                self.scheduler.remove_job(job.id)
+        availability_check = getattr(self.send_service, "get_unavailability_reason", None)
+        try:
+            send_unavailable_reason = availability_check() if callable(availability_check) else None
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("Template scheduling availability probe failed: %s", exc)
+            self._clear_template_jobs()
+            self._ensure_mailbox_jobs(schedule_startup=False)
+            return
+
+        self._clear_template_jobs()
 
         try:
             enabled_templates = self.template_repository.list_enabled()
         except Exception as exc:  # noqa: BLE001
             self.logger.warning("Template scheduling refresh skipped malformed rows: %s", exc)
             enabled_templates = []
+
+        if send_unavailable_reason:
+            self.logger.warning("Template scheduling paused: %s", send_unavailable_reason)
+            self._ensure_mailbox_jobs(schedule_startup=False)
+            return
 
         for template in enabled_templates:
             try:
@@ -243,6 +255,15 @@ class SchedulerManager:
                 return
             if template is None or not getattr(template, "enabled", False):
                 return
+            availability_check = getattr(self.send_service, "get_unavailability_reason", None)
+            try:
+                send_unavailable_reason = availability_check() if callable(availability_check) else None
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning("Template %s availability probe failed after send: %s", template_id, exc)
+                return
+            if send_unavailable_reason:
+                self.logger.warning("Template %s reschedule skipped: %s", template_id, send_unavailable_reason)
+                return
             next_run_at = retry_at or self.send_service.calculate_next_run(template)
             if next_run_at is None:
                 return
@@ -256,3 +277,8 @@ class SchedulerManager:
                 coalesce=True,
             )
             self.logger.info("Rescheduled template %s at %s", template_id, next_run_at.isoformat())
+
+    def _clear_template_jobs(self) -> None:
+        for job in list(self.scheduler.get_jobs()):
+            if job.id.startswith("template_"):
+                self.scheduler.remove_job(job.id)

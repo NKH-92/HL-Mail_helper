@@ -59,6 +59,9 @@ def _cleanup_legacy_dist_folder(root: Path) -> None:
     legacy_dist_dir = root / "dist" / "MailAI_Portable"
     if legacy_dist_dir.exists():
         shutil.rmtree(legacy_dist_dir, ignore_errors=True)
+    legacy_executable = root / "dist" / "HL-Mail.exe"
+    if legacy_executable.exists():
+        legacy_executable.unlink(missing_ok=True)
 
 
 def _append_add_data_args(
@@ -103,8 +106,12 @@ def _build_pyinstaller_command(root: Path, entrypoint: Path, clean_config_root: 
         "pystray",
         "--copy-metadata",
         "openai",
+        "--copy-metadata",
+        "keyring",
         "--collect-data",
         "streamlit",
+        "--collect-all",
+        "keyring",
         "--collect-all",
         "webview",
         "--collect-all",

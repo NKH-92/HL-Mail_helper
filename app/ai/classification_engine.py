@@ -589,7 +589,11 @@ def _derive_action_owner(
     if final_category == 1:
         return "me"
     if final_category == 2:
-        return "team" if analysis.request_target == "group" else "other"
+        if analysis.request_target == "group":
+            return "team"
+        if analysis.request_target == "unknown":
+            return "unknown"
+        return "other"
     if not analysis.request_present:
         return "other"
     return "unknown"
@@ -937,7 +941,7 @@ def _target_from_llm_category(value: int | None) -> Literal["me", "other", "grou
     if value == 1:
         return "me"
     if value == 2:
-        return "other"
+        return "unknown"
     return "unknown"
 
 

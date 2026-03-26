@@ -46,6 +46,22 @@ class BuildPortableTests(unittest.TestCase):
 
             self.assertIn(f"{root / 'addressbook'};addressbook", command)
 
+    def test_build_pyinstaller_command_collects_keyring_for_lazy_imports(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "app").mkdir()
+            entrypoint = root / "run_portable.py"
+            entrypoint.write_text("print('ok')", encoding="utf-8")
+
+            clean_config_root = root / "clean"
+            (clean_config_root / "config").mkdir(parents=True)
+
+            command = build_portable._build_pyinstaller_command(root, entrypoint, clean_config_root)
+            pairs = [command[index : index + 2] for index in range(len(command) - 1)]
+
+            self.assertIn(["--copy-metadata", "keyring"], pairs)
+            self.assertIn(["--collect-all", "keyring"], pairs)
+
 
 if __name__ == "__main__":
     unittest.main()

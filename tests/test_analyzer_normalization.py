@@ -236,6 +236,57 @@ class AnalyzerNormalizationTests(unittest.TestCase):
         self.assertEqual(rule_result.recipient_role, "CC")
         self.assertEqual(rule_result.rule_category, 2)
 
+    def test_missing_category_two_target_stays_unknown_for_validator_follow_up(self) -> None:
+        normalized = normalize_analysis_payload(
+            {
+                "request_present": True,
+                "action_types": ["REVIEW"],
+                "summary": "Team review requested",
+                "evidence": ["Please review this with the group."],
+                "llm_category": 2,
+                "confidence": 0.7,
+            }
+        )
+
+        self.assertTrue(normalized["request_present"])
+        self.assertEqual(normalized["request_target"], "unknown")
+        self.assertFalse(normalized["request_target_is_me"])
+        self.assertEqual(normalized["llm_category"], 2)
+
+    def test_category_two_unknown_target_keeps_unknown_action_owner(self) -> None:
+        normalized = normalize_analysis_payload(
+            {
+                "request_present": True,
+                "action_types": ["REVIEW"],
+                "summary": "Review requested",
+                "evidence": ["Please review this item."],
+                "llm_category": 2,
+                "confidence": 0.73,
+            }
+        )
+        rule_result = build_rule_result(
+            user_email="user@example.com",
+            sender_email="sender@example.com",
+            to_list=["owner@example.com"],
+            cc_list=["user@example.com"],
+            subject="Review requested",
+            body_text="Please review this item.",
+            thread_id="thread-4",
+            message_id="msg-4",
+        )
+
+        decision_payload = build_decision_payload(
+            rule_result=rule_result,
+            analysis=validate_analysis(normalized),
+            model_name="model",
+            analyzed_at="2026-03-08 09:00:00",
+            raw_llm_json="{}",
+            deadline_raw=None,
+        )
+
+        self.assertEqual(decision_payload["final_category"], 2)
+        self.assertEqual(decision_payload["action_owner"], "unknown")
+
 
 if __name__ == "__main__":
     unittest.main()

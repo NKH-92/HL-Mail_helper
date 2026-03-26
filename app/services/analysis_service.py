@@ -293,11 +293,15 @@ class AnalysisService:
                 if isinstance(normalized_validation.get("corrected_result"), dict)
                 else None
             )
+            corrected_deadline_raw = str(corrected_deadline_raw or "").strip() or None
+            normalized_analysis_deadline_raw = str(analysis_deadline_raw or "").strip() or None
             validated_validation = validate_validation(normalized_validation)
             corrected_analysis = validate_analysis(
                 validated_validation.corrected_result.model_dump(exclude={"final_category"})
             )
-            validator_applied = corrected_analysis.model_dump() != analysis.model_dump()
+            semantic_changed = corrected_analysis.model_dump() != analysis.model_dump()
+            deadline_changed = corrected_deadline_raw != normalized_analysis_deadline_raw
+            validator_applied = semantic_changed or deadline_changed
 
             audit_payload.update(
                 {
@@ -310,9 +314,9 @@ class AnalysisService:
                 }
             )
             return (
-                corrected_analysis if validator_applied else analysis,
+                corrected_analysis if semantic_changed else analysis,
                 audit_payload,
-                corrected_deadline_raw if validator_applied else analysis_deadline_raw,
+                corrected_deadline_raw if validator_applied else normalized_analysis_deadline_raw,
             )
         except Exception as exc:  # noqa: BLE001
             message = str(exc)[:500]

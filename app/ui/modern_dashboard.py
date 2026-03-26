@@ -12,19 +12,18 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from app.core.config_manager import AppConfig
-from app.core.security import GEMINI_API_KEY, HANLIM_API_KEY, MAIL_PASSWORD_KEY
+from app.core.security import GEMINI_API_KEY, HANLIM_API_KEY, MAIL_PASSWORD_KEY, mask_sensitive_text
 from app.ui.page_config import (
     ARCHIVE_PAGE,
-    AUTO_SEND_PAGE,
     COMPLETED_PAGE,
     DASHBOARD_PAGE,
     resolve_page_id as _shared_resolve_page_id,
 )
+from app.ui.settings_ops import apply_settings_update
 from app.ui.ui_state_helpers import (
     DASHBOARD_THREAD_PAGE_SIZE as _DASHBOARD_THREAD_PAGE_SIZE,
     build_classified_mail_dicts as _build_classified_mail_dicts,
     build_dashboard_mail_page_context as _build_dashboard_mail_page_context,
-    build_follow_up_mail_template as _build_follow_up_mail_template,
     build_dashboard_mail_category_counts as _build_dashboard_mail_category_counts,
     build_dashboard_thread_page_state as _build_dashboard_thread_page_state,
     build_completed_task_dicts as _build_completed_task_dicts,
@@ -378,7 +377,7 @@ def render_modern_dashboard(context: object, current_page: str) -> None:
         registration_dicts = []
         for registration in registrations:
             next_run = context.send_service.calculate_next_run(registration)
-            next_run_str = next_run.strftime("%Y-%m-%d %H:%M") if next_run else "?덉빟 ?놁쓬"
+            next_run_str = next_run.strftime("%Y-%m-%d %H:%M") if next_run else "예약 없음"
             recipients = len(registration.to_list) + len(registration.cc_list)
             registration_dicts.append(
                 {
@@ -422,7 +421,7 @@ def render_modern_dashboard(context: object, current_page: str) -> None:
             log_dicts.append(
                 {
                     "id": log.id,
-                    "subject": log.subject or "(?쒕ぉ ?놁쓬)",
+                    "subject": log.subject or "(제목 없음)",
                     "recipients": len(log.recipients) if log.recipients else 0,
                     "recipients_list": ", ".join(log.recipients) if log.recipients else "",
                     "result": (log.result or "").lower(),
@@ -543,25 +542,29 @@ def render_modern_dashboard(context: object, current_page: str) -> None:
         return
 
     if action == "save_settings":
-        next_config, pwd, api_key, hanlim_api_key = _build_settings_submission(
-            context.config_manager.load(),
-            payload,
-        )
-        next_config = context.address_book_service.merge_config_profile(next_config)
+        try:
+            current_config = context.config_manager.load()
+            next_config, pwd, api_key, hanlim_api_key = _build_settings_submission(
+                current_config,
+                payload,
+            )
+            next_config = context.address_book_service.merge_config_profile(next_config)
+            deleted_old_count, follow_up_warning = apply_settings_update(
+                context,
+                current_config,
+                next_config,
+                password=pwd,
+                api_key=api_key,
+                hanlim_api_key=hanlim_api_key,
+            )
 
-        context.config_manager.save(next_config)
-        deleted_old_count = context.sync_service.prune_local_mail_retention(days=next_config.sync_days)
-        context.scheduler_manager.refresh_jobs()
-        if pwd:
-            context.secret_store.set_secret(MAIL_PASSWORD_KEY, pwd)
-        if api_key:
-            context.secret_store.set_secret(GEMINI_API_KEY, api_key)
-        if hanlim_api_key:
-            context.secret_store.set_secret(HANLIM_API_KEY, hanlim_api_key)
-
-        flash_message = "?ㅼ젙????ν뻽?듬땲??"
-        if deleted_old_count:
-            flash_message += f" 蹂댁〈湲곌컙??踰쀬뼱??硫붿씪 {deleted_old_count}嫄댁쓣 ?뺣━?덉뒿?덈떎."
+            flash_message = "설정을 저장했습니다."
+            if deleted_old_count:
+                flash_message += f" 보관 기간을 벗어난 메일 {deleted_old_count}건을 정리했습니다."
+            if follow_up_warning:
+                flash_message += f" {follow_up_warning}"
+        except Exception as exc:  # noqa: BLE001
+            flash_message = f"설정 저장에 실패했습니다: {mask_sensitive_text(str(exc))}"
         st.session_state["settings_flash"] = flash_message
         st.rerun()
         return
@@ -572,9 +575,9 @@ def render_modern_dashboard(context: object, current_page: str) -> None:
             pending_config = context.address_book_service.merge_config_profile(pending_config)
             mailboxes = context.imap_client.list_mailboxes(pending_config, password_override=password_override)
             st.session_state["mailbox_candidates"] = mailboxes
-            st.session_state["settings_flash"] = f"硫붿씪??{len(mailboxes)}媛쒕? 媛?몄솕?듬땲??"
+            st.session_state["settings_flash"] = f"메일함 {len(mailboxes)}개를 불러왔습니다."
         except Exception as exc:  # noqa: BLE001
-            st.session_state["settings_flash"] = f"?ㅻ쪟: {exc}"
+            st.session_state["settings_flash"] = f"오류: {mask_sensitive_text(str(exc))}"
         st.rerun()
         return
 
@@ -583,19 +586,23 @@ def render_modern_dashboard(context: object, current_page: str) -> None:
         current_config = context.config_manager.load()
         current_config.mailbox = box
         context.config_manager.save(current_config)
-        st.session_state["settings_flash"] = f"硫붿씪?⑥쓣 {box}濡??곸슜?덉뒿?덈떎."
+        st.session_state["settings_flash"] = f"메일함을 {box}로 적용했습니다."
         st.rerun()
         return
 
     if action == "clear_secret":
-        secret_type = payload.get("type")
-        if secret_type == "password":
-            context.secret_store.delete_secret(MAIL_PASSWORD_KEY)
-        elif secret_type == "api_key":
-            context.secret_store.delete_secret(GEMINI_API_KEY)
-        elif secret_type == "hanlim_api_key":
-            context.secret_store.delete_secret(HANLIM_API_KEY)
-        st.session_state["settings_flash"] = "誘쇨컧?뺣낫瑜???젣?덉뒿?덈떎."
+        try:
+            secret_type = payload.get("type")
+            if secret_type == "password":
+                context.secret_store.delete_secret(MAIL_PASSWORD_KEY)
+                context.scheduler_manager.refresh_jobs()
+            elif secret_type == "api_key":
+                context.secret_store.delete_secret(GEMINI_API_KEY)
+            elif secret_type == "hanlim_api_key":
+                context.secret_store.delete_secret(HANLIM_API_KEY)
+            st.session_state["settings_flash"] = "저장된 민감 정보를 삭제했습니다."
+        except Exception as exc:  # noqa: BLE001
+            st.session_state["settings_flash"] = f"민감 정보 삭제에 실패했습니다: {mask_sensitive_text(str(exc))}"
         st.rerun()
         return
 
@@ -610,7 +617,7 @@ def render_modern_dashboard(context: object, current_page: str) -> None:
     if action == "delete_mail_template":
         template_id = payload.get("id")
         context.mail_template_service.delete_template(template_id)
-        st.session_state["templates_page_flash"] = "?쒗뵆由우쓣 ??젣?덉뒿?덈떎."
+        st.session_state["templates_page_flash"] = "메일 템플릿을 삭제했습니다."
         st.rerun()
         return
 
@@ -618,7 +625,7 @@ def render_modern_dashboard(context: object, current_page: str) -> None:
         template_id = payload.get("id")
         context.template_service.delete_template(template_id)
         context.scheduler_manager.refresh_jobs()
-        st.session_state["templates_page_flash"] = "諛쒖넚?깅줉????젣?덉뒿?덈떎."
+        st.session_state["templates_page_flash"] = "발송 등록을 삭제했습니다."
         st.rerun()
         return
 
@@ -627,9 +634,9 @@ def render_modern_dashboard(context: object, current_page: str) -> None:
             template = _build_mail_template_from_payload(context.address_book_service, payload)
             saved_id = context.mail_template_service.save_template(template)
             _set_autosend_selection(mail_template_id=saved_id)
-            st.session_state["templates_page_flash"] = "?쒗뵆由우쓣 ??ν뻽?듬땲??"
+            st.session_state["templates_page_flash"] = "메일 템플릿을 저장했습니다."
         except Exception as exc:  # noqa: BLE001
-            st.session_state["templates_page_flash"] = f"????ㅽ뙣: {exc}"
+            st.session_state["templates_page_flash"] = f"저장에 실패했습니다: {mask_sensitive_text(str(exc))}"
         st.rerun()
         return
 
@@ -641,10 +648,26 @@ def render_modern_dashboard(context: object, current_page: str) -> None:
                 raise ValueError("\n".join(validation_errors))
             saved_id = context.template_service.save_template(registration)
             _set_autosend_selection(send_registration_id=saved_id)
-            context.scheduler_manager.refresh_jobs()
-            st.session_state["templates_page_flash"] = "諛쒖넚?깅줉????ν뻽?듬땲??"
+            refresh_warning = ""
+            try:
+                context.scheduler_manager.refresh_jobs()
+            except Exception as exc:  # noqa: BLE001
+                refresh_warning = mask_sensitive_text(str(exc))
+                context.logger.exception("Autosend refresh failed after save: %s", exc)
+            send_warning = ""
+            try:
+                send_warning = context.send_service.get_unavailability_reason() or ""
+            except Exception as exc:  # noqa: BLE001
+                send_warning = f"자동발송 상태 확인에 실패했습니다: {mask_sensitive_text(str(exc))}"
+                context.logger.exception("Autosend availability probe failed after save: %s", exc)
+            message_parts = ["발송 등록을 저장했습니다."]
+            if send_warning:
+                message_parts.append(send_warning)
+            if refresh_warning:
+                message_parts.append(f"스케줄 갱신에 실패했습니다: {refresh_warning}")
+            st.session_state["templates_page_flash"] = " ".join(message_parts)
         except Exception as exc:  # noqa: BLE001
-            st.session_state["templates_page_flash"] = f"????ㅽ뙣: {exc}"
+            st.session_state["templates_page_flash"] = f"저장에 실패했습니다: {mask_sensitive_text(str(exc))}"
         st.rerun()
         return
 
@@ -657,51 +680,7 @@ def render_modern_dashboard(context: object, current_page: str) -> None:
             _, message = context.send_service.send_test_template(registration)
             st.session_state["templates_page_flash"] = message
         except Exception as exc:  # noqa: BLE001
-            st.session_state["templates_page_flash"] = f"??뀒?ㅽ듃 諛쒖넚 ?ㅽ뙣: {exc}"
-        st.rerun()
-        return
-
-    if action == "mark_thread_done":
-        thread_key = str(payload.get("thread_key") or "").strip().lower()
-        updated_count = context.mail_repository.mark_thread_done(thread_key)
-        st.session_state[_MODERN_UI_FLASH_KEY] = (
-            f"?ㅻ젅?쒖쓽 硫붿씪 {updated_count}嫄댁쓣 ?꾨즺 ?곹깭濡??뺤떊?덉뒿?덈떎."
-            if updated_count
-            else "?꾨즺 泥섎━???ㅻ젅?쒕? 李얠? 紐삵뻽?듬땲??"
-        )
-        st.rerun()
-        return
-
-    if action == "create_follow_up_draft":
-        thread_key = str(payload.get("thread_key") or "").strip().lower()
-        try:
-            thread = next(
-                (
-                    item
-                    for item in context.mail_repository.list_thread_overviews(user_email=config.user_email)
-                    if str(item.thread_key or "").strip().lower() == thread_key
-                ),
-                None,
-            )
-            if thread is None:
-                raise ValueError("?좏깮???ㅻ젅?쒕? 李얠? 紐삵뻽?듬땲??")
-
-            thread_mails = context.mail_repository.list_thread_mails_by_keys(
-                [thread_key],
-                limit_per_thread=None,
-            ).get(thread_key, [])
-            draft = _build_follow_up_mail_template(
-                thread,
-                thread_mails,
-                current_user_email=config.user_email,
-                current_user_name=config.user_display_name,
-            )
-            saved_id = context.mail_template_service.save_template(draft)
-            _set_autosend_selection(mail_template_id=saved_id)
-            st.session_state["current_page"] = AUTO_SEND_PAGE
-            st.session_state["templates_page_flash"] = "?꾩냽 珥덉븞????ν븯怨??먮룞諛쒖넚 ?붾줈 ?대룞?⑸땲??"
-        except Exception as exc:  # noqa: BLE001
-            st.session_state[_MODERN_UI_FLASH_KEY] = str(exc) or "?꾩냽 珥덉븞 ?앹꽦??ㅽ뙣?덉뒿?덈떎."
+            st.session_state["templates_page_flash"] = f"테스트 발송에 실패했습니다: {mask_sensitive_text(str(exc))}"
         st.rerun()
         return
 
