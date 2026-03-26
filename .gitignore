@@ -16,6 +16,7 @@ data/
 logs/
 dist/
 release/
+deployment/
 temp_html_fix/
 .streamlit/
 

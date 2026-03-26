@@ -80,6 +80,9 @@ def _append_add_data_args(
 def _build_pyinstaller_command(root: Path, entrypoint: Path, clean_config_root: Path) -> list[str]:
     """Build the PyInstaller command with optional runtime assets."""
 
+    icon_path = root / "icon.png"
+    spec_dir = clean_config_root / "pyinstaller-spec"
+    spec_dir.mkdir(parents=True, exist_ok=True)
     command = [
         sys.executable,
         "-m",
@@ -90,6 +93,8 @@ def _build_pyinstaller_command(root: Path, entrypoint: Path, clean_config_root: 
         "--windowed",
         "--name",
         "MailAI_Portable",
+        "--specpath",
+        str(spec_dir),
         "--copy-metadata",
         "streamlit",
         "--copy-metadata",
@@ -111,6 +116,8 @@ def _build_pyinstaller_command(root: Path, entrypoint: Path, clean_config_root: 
         "--hidden-import",
         "streamlit.runtime.scriptrunner.magic_funcs",
     ]
+    if icon_path.exists():
+        command.extend(["--icon", str(icon_path)])
     _append_add_data_args(command, root / "app", "app", required=True)
     _append_add_data_args(command, clean_config_root / "config", "config", required=True)
     _append_add_data_args(command, root / ".streamlit", ".streamlit")

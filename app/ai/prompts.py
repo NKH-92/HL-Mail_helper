@@ -68,7 +68,12 @@ class PromptManager:
                 "- If request_target_is_me=true, llm_category should be 1.\n"
                 "- If the user is only in Cc but explicitly named as the acting person, request_target must be \"me\".\n"
                 "- Never change routing facts such as is_to_me, is_cc_me, or recipient_role.\n"
-                "- Evidence must be the smallest set of short quotes needed to justify the decision."
+                "- Evidence must be the smallest set of short quotes needed to justify the decision.\n"
+                "- summary must be written in Korean by default.\n"
+                "- If a key business term is clearer in English, write Korean first and append the original English "
+                "in parentheses on first mention. Example: 공정 밸리데이션(Process Validation).\n"
+                "- Avoid English-only summaries unless the term is a fixed proper noun, product name, or acronym.\n"
+                "- Evidence may remain in the original language when quoting the source email."
             ),
         ]
         self._cached_system_prompt_signature = signature
@@ -121,7 +126,12 @@ class PromptManager:
             "request_target_is_me=true.\n"
             "- If the email is short and vague, rely on thread_context when available.\n"
             "- If an email mixes sharing language and request language, prioritize the real request when supported by evidence.\n"
-            "- summary must be one sentence and businesslike."
+            "- summary must be one sentence and businesslike.\n"
+            "- corrected_result.summary must be written in Korean by default.\n"
+            "- If a key business term is clearer in English, write Korean first and append the original English in "
+            "parentheses on first mention. Example: 공정 밸리데이션(Process Validation).\n"
+            "- Avoid English-only summaries unless the term is a fixed proper noun, product name, or acronym.\n"
+            "- Evidence may remain in the original language when quoting the source email."
         )
 
     def _build_prompt_signature(self, file_names: list[str]) -> tuple[tuple[str, int | None], ...]:

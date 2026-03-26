@@ -9,11 +9,16 @@ from PyInstaller.utils.hooks import copy_metadata
 
 ROOT = Path(__file__).resolve().parent
 
-datas = [
-    (str(ROOT / "app"), "app"),
-    (str(ROOT / ".streamlit"), ".streamlit"),
-    (str(ROOT / "addressbook"), "addressbook"),
-]
+
+def _append_optional_data(datas: list[tuple[str, str]], source: Path, target: str) -> None:
+    if source.exists():
+        datas.append((str(source), target))
+
+
+datas = []
+_append_optional_data(datas, ROOT / "app", "app")
+_append_optional_data(datas, ROOT / ".streamlit", ".streamlit")
+_append_optional_data(datas, ROOT / "addressbook", "addressbook")
 binaries = []
 hiddenimports = ["streamlit.runtime.scriptrunner.magic_funcs"]
 
@@ -70,4 +75,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=[str(ROOT / "icon.png")] if (ROOT / "icon.png").exists() else None,
 )

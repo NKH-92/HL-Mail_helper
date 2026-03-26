@@ -123,6 +123,16 @@ class PromptAndUiHelperTests(unittest.TestCase):
             self.assertIn("enterprise-grade email action classification engine", prompt)
             self.assertIn("Use only these enum values:", prompt)
             self.assertIn("Determine whether the request is directed to:", prompt)
+            self.assertIn("summary must be written in Korean by default.", prompt)
+            self.assertIn("공정 밸리데이션(Process Validation)", prompt)
+
+    def test_prompt_manager_includes_korean_summary_policy_in_validation_prompt(self) -> None:
+        manager = PromptManager(Path(tempfile.gettempdir()))
+
+        prompt = manager.build_validation_system_prompt()
+
+        self.assertIn("corrected_result.summary must be written in Korean by default.", prompt)
+        self.assertIn("공정 밸리데이션(Process Validation)", prompt)
 
     def test_prompt_manager_rebuilds_cached_system_prompt_when_source_changes(self) -> None:
         with tempfile.TemporaryDirectory() as prompt_dir:

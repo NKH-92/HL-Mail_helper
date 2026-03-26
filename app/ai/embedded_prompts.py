@@ -88,6 +88,11 @@ If no action is required, return ["NONE"].
 ## Summary behavior
 
 - summary must be one sentence and businesslike.
+- summary must be written in Korean by default.
+- If a business, process, document, or system term is clearer in English, write Korean first and append the original English in parentheses on first mention.
+- Example: 공정 밸리데이션(Process Validation) 검토 요청.
+- Avoid English-only summaries unless the term is a fixed proper noun, product name, or acronym.
+- Keep evidence as short source-grounded snippets. Evidence may remain in the original language when quoting or citing the email.
 - Avoid long quotations in summary or evidence.
 - Be conservative with weak informational emails, but do not miss real requests supported by evidence.""",
     "ownership_prompt.txt": """## Request target
